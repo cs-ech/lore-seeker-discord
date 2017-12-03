@@ -150,7 +150,7 @@ impl EventHandler for Handler {
                 .expect("failed to find search result in Lore Seeker response")
                 .as_node()
                 .children()
-                .filter_map(|node| node.first_child().and_then(|text_node| text_node.as_text().map(|text| text.borrow().to_owned())));
+                .filter_map(|node| node.first_child().and_then(|text_node| text_node.as_text().map(|text| text.borrow().trim().to_owned())));
             match (matches.next(), matches.next()) {
                 (Some(_), Some(_)) => { msg.reply(&format!("{} cards found: https://loreseeker.fenhl.net/card?q={}", 2 + matches.count(), encoded_query)).expect("failed to reply"); }
                 (Some(card_name), None) => { msg.reply(&format!("{} https://loreseeker.fenhl.net/card?q=!{}", card_name, urlencoding::encode(&card_name))).expect("failed to reply"); } //TODO reply with card stats & resolved Lore Seeker URL
