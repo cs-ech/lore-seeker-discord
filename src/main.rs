@@ -128,6 +128,7 @@ enum Rarity {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct CardData {
     //TODO layout
     name: String,
