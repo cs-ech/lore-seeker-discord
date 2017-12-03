@@ -2,18 +2,18 @@
 #![deny(unused)]
 #![forbid(unused_extern_crates, unused_import_braces)]
 
+extern crate kuchiki;
 extern crate reqwest;
 extern crate serenity;
 extern crate urlencoding;
-extern crate victoria_dom;
 
 use std::{env, process};
 use std::io::prelude::*;
 
+use kuchiki::traits::TendrilSink;
+
 use serenity::prelude::*;
 use serenity::model::{EmojiId, Message, Permissions, ReactionType, Ready};
-
-use victoria_dom::DOM;
 
 macro_rules! manamoji {
     ($($sym:expr => $name:expr, $id:expr;)+) => {
@@ -143,8 +143,14 @@ impl EventHandler for Handler {
             }
             let mut response_content = String::default();
             response.read_to_string(&mut response_content).expect("failed to read Lore Seeker response");
-            let dom = DOM::new(&response_content).at("ul#search-result").expect("search result not found in Lore Seeker page").childs(None);
-            let mut matches = dom.iter().map(DOM::text);
+            let document = kuchiki::parse_html().one(response_content);
+            let mut matches = document.select("ul#search-result")
+                .expect("failed to parse Lore Seeker response")
+                .next()
+                .expect("failed to find search result in Lore Seeker response")
+                .as_node()
+                .children()
+                .filter_map(|node| node.first_child().and_then(|text_node| text_node.as_text().map(|text| text.borrow().to_owned())));
             match (matches.next(), matches.next()) {
                 (Some(_), Some(_)) => { msg.reply(&format!("{} cards found: https://loreseeker.fenhl.net/card?q={}", 2 + matches.count(), encoded_query)).expect("failed to reply"); }
                 (Some(card_name), None) => { msg.reply(&format!("{} https://loreseeker.fenhl.net/card?q=!{}", card_name, urlencoding::encode(&card_name))).expect("failed to reply"); } //TODO reply with card stats & resolved Lore Seeker URL

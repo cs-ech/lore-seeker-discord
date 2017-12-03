@@ -11,7 +11,7 @@ test = false
 bench = false
 
 [dependencies]
+kuchiki = "*"
 reqwest = "*"
 serenity = "*"
 urlencoding = "*"
-victoria-dom = "*"
