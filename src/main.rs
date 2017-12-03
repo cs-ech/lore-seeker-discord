@@ -133,6 +133,7 @@ struct CardData {
     //TODO layout
     name: String,
     //TODO names
+    #[serde(default)]
     mana_cost: String,
     #[serde(rename = "type")]
     type_line: String,
