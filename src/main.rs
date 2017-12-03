@@ -3,6 +3,7 @@
 #![forbid(unused_extern_crates, unused_import_braces)]
 
 extern crate serenity;
+extern crate urlencoding;
 
 use std::env;
 use std::process::{self, Stdio};
@@ -53,8 +54,8 @@ impl EventHandler for Handler {
             let output = String::from_utf8(stdout).expect("find_cards did not output valid Unicode");
             let mut matches = output.lines();
             match (matches.next(), matches.next()) {
-                (Some(_), Some(_)) => { msg.reply(&format!("{} cards found", 2 + matches.count())).expect("failed to reply"); } //TODO reply with Lore Seeker search URL
-                (Some(card_name), None) => { msg.reply(card_name).expect("failed to reply"); } //TODO reply with card stats & Lore Seeker URL
+                (Some(_), Some(_)) => { msg.reply(&format!("{} cards found: https://loreseeker.fenhl.net/card?q={}", 2 + matches.count(), urlencoding::encode(query))).expect("failed to reply"); }
+                (Some(card_name), None) => { msg.reply(&format!("{} https://loreseeker.fenhl.net/card?q=!{}", card_name, urlencoding::encode(card_name))).expect("failed to reply"); } //TODO reply with card stats & resolved Lore Seeker URL
                 (None, _) => { msg.reply("no cards found").expect("failed to reply"); }
             }
         } else if msg.content.contains("[[") && msg.content.contains("]]") {

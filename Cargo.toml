@@ -12,3 +12,4 @@ bench = false
 
 [dependencies]
 serenity = "*"
+urlencoding = "*"
