@@ -232,10 +232,10 @@ impl EventHandler for Handler {
             match (matches.next(), matches.next()) {
                 (Some(_), Some(_)) => { msg.reply(&format!("{} cards found: https://loreseeker.fenhl.net/card?q={}", 2 + matches.count(), encoded_query)).expect("failed to reply"); }
                 (Some(card_name), None) => {
-                    let card = CardData::from_str(&card_name).expect("card not found in database");
                     let card_url = format!("https://loreseeker.fenhl.net/card?q=!{}", urlencoding::encode(&card_name)); //TODO use exact printing URL
                     let mut reply = msg.reply(&format!("1 card found: {}", card_url)).expect("failed to reply");
                     msg.channel_id.broadcast_typing().expect("failed to broadcast typing");
+                    let card = CardData::from_str(&card_name).expect("card not found in database");
                     reply.edit(|m| m
                         .embed(|e| e
                             .color(match card.rarity {
