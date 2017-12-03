@@ -26,7 +26,7 @@ impl EventHandler for Handler {
     fn on_message(&self, _: Context, msg: Message) {
         if msg.author.bot { return; } // ignore bots to prevent message loops
         let current_user_id = serenity::CACHE.read().expect("failed to get serenity cache").user.id;
-        if msg.content.starts_with(&current_user_id.mention()) { //TODO allow <@!id> mentions
+        if msg.content.starts_with(&current_user_id.mention()) || msg.author.create_dm_channel().ok().map_or(false, |dm| dm.id == msg.channel_id) { //TODO allow <@!id> mentions
             msg.channel_id.broadcast_typing().expect("failed to broadcast typing");
             let mut query = &msg.content[current_user_id.mention().len()..];
             if query.starts_with(':') { query = &query[1..]; }
