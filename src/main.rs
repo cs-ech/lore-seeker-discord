@@ -24,6 +24,7 @@ impl EventHandler for Handler {
     }
 
     fn on_message(&self, _: Context, msg: Message) {
+        if msg.author.bot { return; } // ignore bots to prevent message loops
         let current_user_id = serenity::CACHE.read().expect("failed to get serenity cache").user.id;
         if msg.content.starts_with(&current_user_id.mention()) { //TODO allow <@!id> mentions
             msg.channel_id.broadcast_typing().expect("failed to broadcast typing");
