@@ -2,14 +2,111 @@
 #![deny(unused)]
 #![forbid(unused_extern_crates, unused_import_braces)]
 
+extern crate reqwest;
 extern crate serenity;
 extern crate urlencoding;
+extern crate victoria_dom;
 
-use std::env;
-use std::process::{self, Stdio};
+use std::{env, process};
+use std::io::prelude::*;
 
 use serenity::prelude::*;
-use serenity::model::{Message, Permissions, Ready};
+use serenity::model::{EmojiId, Message, Permissions, ReactionType, Ready};
+
+use victoria_dom::DOM;
+
+macro_rules! manamoji {
+    ($($sym:expr => $name:expr, $id:expr;)+) => {
+        #[allow(unused)] //TODO
+        fn manamoji(s: &str) -> Option<ReactionType> {
+            match s {
+                $($sym => Some(ReactionType::Custom {
+                    id: EmojiId($id),
+                    name: Some($name.to_owned())
+                }),)+
+                _ => None
+            }
+        }
+
+        #[allow(unused)] //TODO
+        fn with_manamoji(s: &str) -> String {
+            $(
+                let mut split = s.split($sym);
+                let mut s = split.next().expect("failed to convert manamoji").to_owned();
+                for part in split {
+                    s.push_str(&ReactionType::Custom {
+                        id: EmojiId($id),
+                        name: Some($name.to_owned())
+                    }.to_string());
+                    s.push_str(part);
+                }
+            )+
+            s
+        }
+    };
+}
+
+manamoji! {
+    "{0}" => "mana0", 386740600436686878;
+    "{1}" => "mana1", 386740600399069204;
+    "{10}" => "mana10", 386740603708506142;
+    "{11}" => "mana11", 386741116927475718;
+    "{12}" => "mana12", 386741117577592833;
+    "{13}" => "mana13", 386741118303469570;
+    "{14}" => "mana14", 386741118668242964;
+    "{15}" => "mana15", 386741118273847307;
+    "{16}" => "mana16", 386741118597070850;
+    "{17}" => "mana17", 386741120434044948;
+    "{18}" => "mana18", 386741120006094860;
+    "{19}" => "mana19", 386741120371261449;
+    "{2}" => "mana2", 386740600755453953;
+    "{2/B}" => "mana2b", 386741115807596547;
+    "{2/G}" => "mana2g", 386741116118106122;
+    "{2/R}" => "mana2r", 386741116222963712;
+    "{2/U}" => "mana2u", 386741115933687809;
+    "{2/W}" => "mana2w", 386741116462039043;
+    "{20}" => "mana20", 386741120543227906;
+    "{3}" => "mana3", 386740601082871822;
+    "{4}" => "mana4", 386740601556828160;
+    "{5}" => "mana5", 386740601724338176;
+    "{6}" => "mana6", 386740602265403392;
+    "{7}" => "mana7", 386740602374717440;
+    "{8}" => "mana8", 386740602747879435;
+    "{9}" => "mana9", 386740603494334484;
+    "{B}" => "manab", 386740604341583873;
+    "{B/G}" => "manabg", 386740605847470081;
+    "{B/P}" => "manabp", 386741121486815232;
+    "{B/R}" => "manabr", 386740607017549838;
+    "{C}" => "manac", 386740607416139777;
+    "{CHAOS}" => "manachaos", 386741121608318986;
+    "{E}" => "manae", 386741121780416513;
+    "{G}" => "manag", 386740607827181569;
+    "{G/P}" => "managp", 386741122225012761;
+    "{G/U}" => "managu", 386740607906873344;
+    "{G/W}" => "managw", 386740607994953728;
+    "{Q}" => "manaq", 386741125987434506;
+    "{R}" => "manar", 386740612394778634;
+    "{R/G}" => "manarg", 386740613430640640;
+    "{R/P}" => "manarp", 386741125773262860;
+    "{R/W}" => "manarw", 386740615498563588;
+    "{S}" => "manas", 386741126939541505;
+    "{T}" => "manat", 386740612143120385;
+    "{U}" => "manau", 386740612289789953;
+    "{U/B}" => "manaub", 386740615683112992;
+    "{U/P}" => "manaup", 386741126247350284;
+    "{U/R}" => "manaur", 386740615649558534;
+    "{W}" => "manaw", 386740617792978944;
+    "{W/B}" => "manawb", 386740617780264960;
+    "{W/P}" => "manawp", 386741126645809162;
+    "{W/U}" => "manawu", 386740617792978964;
+    "{X}" => "manax", 386740617667018752;
+    "{Y}" => "manay", 386741126457065473;
+    "{Z}" => "manaz", 386741127207845890;
+    "{hr}" => "manahr", 386741125672730634;
+    "{hw}" => "manahw", 386741125773262848;
+    "{½}" => "manahalf", 386741122510225421;
+    "{∞}" => "manainfinity", 386741125861605387;
+}
 
 struct Handler;
 
@@ -39,23 +136,18 @@ impl EventHandler for Handler {
         };
         if let Some(query) = query {
             msg.channel_id.broadcast_typing().expect("failed to broadcast typing");
-            let process::Output { status, stdout, .. } = process::Command::new("find_cards")
-                .arg(if query == "-v" { "(-v)" } else { query })
-                .stdout(Stdio::piped())
-                .stderr(Stdio::null())
-                .output()
-                .expect("failed to execute find_cards");
-            if !status.success() {
-                match status.code() {
-                    Some(code) => { panic!("find_cards exited with status code {}", code); }
-                    None => { panic!("find_cards terminated by signal"); }
-                }
+            let encoded_query = urlencoding::encode(query);
+            let mut response = reqwest::get(&format!("http://localhost:18803/list?q={}", encoded_query)).expect("failed to send Lore Seeker request");
+            if !response.status().is_success() {
+                panic!("Lore Seeker responded with status code {}", response.status());
             }
-            let output = String::from_utf8(stdout).expect("find_cards did not output valid Unicode");
-            let mut matches = output.lines();
+            let mut response_content = String::default();
+            response.read_to_string(&mut response_content).expect("failed to read Lore Seeker response");
+            let dom = DOM::new(&response_content).at("ul#search-result").expect("search result not found in Lore Seeker page").childs(None);
+            let mut matches = dom.iter().map(DOM::text);
             match (matches.next(), matches.next()) {
-                (Some(_), Some(_)) => { msg.reply(&format!("{} cards found: https://loreseeker.fenhl.net/card?q={}", 2 + matches.count(), urlencoding::encode(query))).expect("failed to reply"); }
-                (Some(card_name), None) => { msg.reply(&format!("{} https://loreseeker.fenhl.net/card?q=!{}", card_name, urlencoding::encode(card_name))).expect("failed to reply"); } //TODO reply with card stats & resolved Lore Seeker URL
+                (Some(_), Some(_)) => { msg.reply(&format!("{} cards found: https://loreseeker.fenhl.net/card?q={}", 2 + matches.count(), encoded_query)).expect("failed to reply"); }
+                (Some(card_name), None) => { msg.reply(&format!("{} https://loreseeker.fenhl.net/card?q=!{}", card_name, urlencoding::encode(&card_name))).expect("failed to reply"); } //TODO reply with card stats & resolved Lore Seeker URL
                 (None, _) => { msg.reply("no cards found").expect("failed to reply"); }
             }
         } else if msg.content.contains("[[") && msg.content.contains("]]") {
