@@ -236,7 +236,6 @@ impl EventHandler for Handler {
                     let mut reply = msg.reply(&format!("1 card found: {}", card_url)).expect("failed to reply");
                     msg.channel_id.broadcast_typing().expect("failed to broadcast typing");
                     reply.edit(|m| m
-                        .content("")
                         .embed(|e| e
                             .color(match card.rarity {
                                 Rarity::Land | Rarity::Common => (1, 1, 1),// Discord turns actual black into light gray
