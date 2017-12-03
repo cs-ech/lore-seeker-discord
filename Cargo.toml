@@ -13,5 +13,8 @@ bench = false
 [dependencies]
 kuchiki = "*"
 reqwest = "*"
+serde = "*"
+serde_derive = "*"
+serde_json = "*"
 serenity = "*"
 urlencoding = "*"
