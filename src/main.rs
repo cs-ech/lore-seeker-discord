@@ -213,7 +213,6 @@ impl EventHandler for Handler {
             None
         };
         if let Some(query) = query {
-            msg.channel_id.broadcast_typing().expect("failed to broadcast typing");
             let encoded_query = urlencoding::encode(query);
             let mut response = reqwest::get(&format!("http://localhost:18803/list?q={}", encoded_query)).expect("failed to send Lore Seeker request");
             if !response.status().is_success() {
