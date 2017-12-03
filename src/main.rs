@@ -213,7 +213,6 @@ impl EventHandler for Handler {
             None
         };
         if let Some(query) = query {
-            msg.channel_id.broadcast_typing().expect("failed to broadcast typing");
             let encoded_query = urlencoding::encode(query);
             let mut response = reqwest::get(&format!("http://localhost:18803/list?q={}", encoded_query)).expect("failed to send Lore Seeker request");
             if !response.status().is_success() {
@@ -233,8 +232,11 @@ impl EventHandler for Handler {
                 (Some(_), Some(_)) => { msg.reply(&format!("{} cards found: https://loreseeker.fenhl.net/card?q={}", 2 + matches.count(), encoded_query)).expect("failed to reply"); }
                 (Some(card_name), None) => {
                     let card = CardData::from_str(&card_name).expect("card not found in database");
-                    msg.channel_id.send_message(|m| m
-                        .content("1 card found")
+                    let card_url = format!("https://loreseeker.fenhl.net/card?q=!{}", urlencoding::encode(&card_name)); //TODO use exact printing URL
+                    let mut reply = msg.reply(&format!("1 card found: {}", card_url)).expect("failed to reply");
+                    msg.channel_id.broadcast_typing().expect("failed to broadcast typing");
+                    reply.edit(|m| m
+                        .content("")
                         .embed(|e| e
                             .color(match card.rarity {
                                 Rarity::Land | Rarity::Common => (1, 1, 1),// Discord turns actual black into light gray
@@ -244,7 +246,7 @@ impl EventHandler for Handler {
                                 Rarity::Special => (144, 99, 156)
                             })
                             .title(format!("{} {}", card.name, with_manamoji(&card.mana_cost)))
-                            .url(&format!("https://loreseeker.fenhl.net/card?q=!{}", urlencoding::encode(&card_name))) //TODO use exact printing URL
+                            .url(&card_url)
                             .description(MessageBuilder::default()
                                 .push_bold_safe(&card.type_line) //TODO color indicator
                                 .push("\n\n")
@@ -272,7 +274,7 @@ impl EventHandler for Handler {
                             )
                             //TODO printings
                         )
-                    ).expect("failed to reply");
+                    ).expect("failed to edit reply");
                 } //TODO reply with card stats & resolved Lore Seeker URL
                 (None, _) => { msg.reply("no cards found").expect("failed to reply"); }
             }
