@@ -571,7 +571,7 @@ dependencies = [
 [[package]]
 name = "mtg"
 version = "0.0.1"
-source = "git+ssh://fenhl@fenhl.net/opt/git/localhost/rust-mtg/rust-mtg.git#4b662dc073b5ee602ea8f4f82a91ead0ac4e35fb"
+source = "git+ssh://fenhl@fenhl.net/opt/git/localhost/rust-mtg/rust-mtg.git#de5b3290e14c463c012fd043a89d83656663ecaa"
 dependencies = [
  "chan-signal 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
