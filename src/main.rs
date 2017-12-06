@@ -208,7 +208,13 @@ impl EventHandler for Handler {
 }
 
 fn main() {
+    // read config
     let token = env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN envar");
+    // load cards before going online
+    print!("[....] loading cards");
+    assert!(Card::from_str("Dryad Arbor").expect("failed to load dummy card").loyalty().is_none());
+    println!("\r[ ok ] {} cards loaded", mtg::cards::Iter::default().count());
+    // connect to Discord
     let mut client = Client::new(&token, Handler);
     client.start_autosharded().expect("client error");
 }

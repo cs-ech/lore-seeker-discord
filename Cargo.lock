@@ -571,7 +571,7 @@ dependencies = [
 [[package]]
 name = "mtg"
 version = "0.0.1"
-source = "git+ssh://fenhl@fenhl.net/opt/git/localhost/rust-mtg/rust-mtg.git#9b7217cf1f7fd11a4d6a9a1bd8818e313d8f0c58"
+source = "git+ssh://fenhl@fenhl.net/opt/git/localhost/rust-mtg/rust-mtg.git#19d8697f673ef112af130d7ef8933ada3facb6b2"
 dependencies = [
  "chan-signal 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -579,7 +579,6 @@ dependencies = [
  "rand 0.3.18 (registry+https://github.com/rust-lang/crates.io-index)",
  "regex 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "reqwest 0.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "rustc-serialize 0.3.24 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 1.0.23 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_derive 1.0.23 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_json 1.0.7 (registry+https://github.com/rust-lang/crates.io-index)",
