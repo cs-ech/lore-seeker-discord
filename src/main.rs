@@ -3,18 +3,18 @@
 #![forbid(unused_extern_crates, unused_import_braces)]
 
 extern crate kuchiki;
+extern crate mtg;
 extern crate reqwest;
-#[macro_use] extern crate serde_derive;
-extern crate serde_json;
 extern crate serenity;
 extern crate urlencoding;
 
-use std::{env, io, process};
-use std::fs::{self, File};
+use std::{env, process};
 use std::io::prelude::*;
 use std::str::FromStr;
 
 use kuchiki::traits::TendrilSink;
+
+use mtg::cards::Card;
 
 use serenity::builder::CreateEmbedField;
 use serenity::prelude::*;
@@ -113,79 +113,6 @@ manamoji! {
     "{∞}" => "manainfinity", 386741125861605387;
 }
 
-const SETS_DIR: &'static str = "/opt/git/github.com/fenhl/lore-seeker/stage/data/sets";
-
-#[derive(Deserialize)]
-enum Rarity {
-    #[serde(rename = "Basic Land")]
-    Land,
-    Common,
-    Uncommon,
-    Rare,
-    #[serde(rename = "Mythic Rare")]
-    Mythic,
-    Special
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CardData {
-    //TODO layout
-    name: String,
-    //TODO names
-    #[serde(default)]
-    mana_cost: String,
-    #[serde(rename = "type")]
-    type_line: String,
-    rarity: Rarity,
-    #[serde(default)]
-    text: String,
-    power: Option<String>,
-    toughness: Option<String>,
-    loyalty: Option<String>,
-    hand: Option<i8>,
-    life: Option<i8>
-}
-
-#[derive(Debug)]
-enum CardFromStrErr {
-    CardNotFound,
-    Io(io::Error),
-    Serde(serde_json::Error)
-}
-
-impl From<io::Error> for CardFromStrErr {
-    fn from(e: io::Error) -> CardFromStrErr {
-        CardFromStrErr::Io(e)
-    }
-}
-
-impl From<serde_json::Error> for CardFromStrErr {
-    fn from(e: serde_json::Error) -> CardFromStrErr {
-        CardFromStrErr::Serde(e)
-    }
-}
-
-impl FromStr for CardData {
-    type Err = CardFromStrErr;
-
-    fn from_str(card_name: &str) -> Result<CardData, CardFromStrErr> {
-        for entry in fs::read_dir(SETS_DIR)? {
-            if let serde_json::Value::Object(set_info) = serde_json::from_reader(File::open(entry?.path())?)? {
-                if let Some(&serde_json::Value::Array(ref cards)) = set_info.get("cards") {
-                    for card in cards {
-                        let card_info = if let &serde_json::Value::Object(ref card_info) = card { card_info } else { continue; };
-                        if card_info.get("name").map_or(false, |name| name == card_name) {
-                            return Ok(serde_json::from_value(card.clone())?);
-                        }
-                    }
-                }
-            }
-        }
-        Err(CardFromStrErr::CardNotFound)
-    }
-}
-
 struct Handler;
 
 impl EventHandler for Handler {
@@ -234,35 +161,32 @@ impl EventHandler for Handler {
                     let card_url = format!("https://loreseeker.fenhl.net/card?q=!{}", urlencoding::encode(&card_name)); //TODO use exact printing URL
                     let mut reply = msg.reply(&format!("1 card found: {}", card_url)).expect("failed to reply");
                     msg.channel_id.broadcast_typing().expect("failed to broadcast typing");
-                    let card = CardData::from_str(&card_name).expect("card not found in database");
+                    let card = Card::from_str(&card_name).expect("card not found in database");
                     reply.edit(|m| m
                         .embed(|e| e
-                            .color(match card.rarity {
-                                Rarity::Land | Rarity::Common => (1, 1, 1),// Discord turns actual black into light gray
-                                Rarity::Uncommon => (140, 159, 172),
-                                Rarity::Rare => (178, 152, 81),
-                                Rarity::Mythic => (217, 97, 33),
-                                Rarity::Special => (144, 99, 156)
+                            .color(match card.rarity().color() {
+                                (0, 0, 0) => (1, 1, 1), // Discord turns actual black into light gray
+                                c => c
                             })
-                            .title(format!("{} {}", card.name, with_manamoji(&card.mana_cost)))
+                            .title(format!("{} {}", card, with_manamoji(&card.mana_cost().map_or("".to_owned(), |cost| cost.to_string()))))
                             .url(&card_url)
                             .description(MessageBuilder::default()
-                                .push_bold_safe(&card.type_line) //TODO color indicator
+                                .push_bold_safe(&card.type_line()) //TODO color indicator
                                 .push("\n\n")
-                                .push(with_manamoji(&card.text)) //TODO add support for levelers, fix loyalty costs and quotes, italicize ability words and reminder text
+                                .push(with_manamoji(&card.text())) //TODO add support for levelers, fix loyalty costs and quotes, italicize ability words and reminder text
                             )
                             .fields(
-                                (if let (&Some(ref pow), &Some(ref tou)) = (&card.power, &card.toughness) {
-                                    Some(CreateEmbedField::default().name("P/T").value(format!("{}/{}", pow, tou)))
+                                (if let Some((pow, tou)) = card.pt() {
+                                    Some(CreateEmbedField::default().name("P/T").value(MessageBuilder::default().push_safe(pow).push("/").push_safe(tou)))
                                 } else {
                                     None
                                 }).into_iter()
-                                .chain(if let Some(ref loy) = card.loyalty {
-                                    Some(CreateEmbedField::default().name("Loyalty").value(loy.to_owned()))
+                                .chain(if let Some(loy) = card.loyalty() {
+                                    Some(CreateEmbedField::default().name("Loyalty").value(loy))
                                 } else {
                                     None
                                 })
-                                .chain(if let (Some(hand), Some(life)) = (card.hand, card.life) {
+                                .chain(if let Some((hand, life)) = card.vanguard_modifiers() {
                                     vec![
                                         CreateEmbedField::default().name("Hand modifier").value(format!("{:+}", hand)),
                                         CreateEmbedField::default().name("Life modifier").value(format!("{:+}", life))

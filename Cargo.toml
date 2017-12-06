@@ -13,8 +13,9 @@ bench = false
 [dependencies]
 kuchiki = "*"
 reqwest = "*"
-serde = "*"
-serde_derive = "*"
-serde_json = "*"
 serenity = "*"
 urlencoding = "*"
+
+[dependencies.mtg]
+git = "ssh://fenhl@fenhl.net/opt/git/localhost/rust-mtg/rust-mtg.git"
+features = ["custom"]
