@@ -18,7 +18,7 @@ use mtg::cards::Card;
 
 use serenity::builder::CreateEmbedField;
 use serenity::prelude::*;
-use serenity::model::{EmojiId, Message, Permissions, ReactionType, Ready};
+use serenity::model::{EmojiId, Guild, Message, Permissions, ReactionType, Ready};
 use serenity::utils::MessageBuilder;
 
 macro_rules! manamoji {
@@ -124,6 +124,10 @@ impl EventHandler for Handler {
             ctx.quit().expect("failed to quit");
             process::exit(1); //TODO (serenity 0.5.0) remove
         }
+    }
+
+    fn on_guild_create(&self, _: Context, guild: Guild, _: bool) {
+        println!("[ ** ] Connected to {}", guild.name);
     }
 
     fn on_message(&self, _: Context, msg: Message) {
