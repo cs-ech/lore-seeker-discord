@@ -8,7 +8,7 @@ extern crate reqwest;
 extern crate serenity;
 extern crate urlencoding;
 
-use std::{env, process};
+use std::{env, io, process};
 use std::io::prelude::*;
 use std::str::FromStr;
 
@@ -212,6 +212,7 @@ fn main() {
     let token = env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN envar");
     // load cards before going online
     print!("[....] loading cards");
+    io::stdout().flush().expect("failed to flush stdout");
     assert!(Card::from_str("Dryad Arbor").expect("failed to load dummy card").loyalty().is_none());
     println!("\r[ ok ] {} cards loaded", mtg::cards::Iter::default().count());
     // connect to Discord
