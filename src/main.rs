@@ -164,13 +164,15 @@ impl EventHandler for Handler {
             if let Some(cmd_name) = eat_word(&mut query.unwrap()) {
                 match &cmd_name[..] {
                     "quit" => {
-                        let data = ctx.data.lock();
-                        let owners = data.get::<Owners>().expect("missing owners set");
-                        if !owners.contains(&msg.author.id) {
-                            msg.reply("only owners can use this command").expect("failed to reply");
-                            return;
-                        }
+                        if !owner_check(&ctx, &msg) { return; }
                         ctx.quit().expect("failed to quit");
+                        return;
+                    }
+                    "update" => {
+                        if !owner_check(&ctx, &msg) { return; }
+                        let mut data = ctx.data.lock();
+                        let db = Db::from_sets_dir("/opt/git/github.com/fenhl/lore-seeker/stage/data/sets").expect("failed to load card database");
+                        data.insert::<CardDb>(db);
                         return;
                     }
                     _ => {
@@ -270,15 +272,26 @@ fn next_word(subj: &str) -> Option<String> {
     if word.is_empty() { None } else { Some(word) }
 }
 
+fn owner_check(ctx: &Context, msg: &Message) -> bool {
+    let data = ctx.data.lock();
+    let owners = data.get::<Owners>().expect("missing owners set");
+    if owners.contains(&msg.author.id) {
+        true
+    } else {
+        msg.reply("only owners can use this command").expect("failed to reply");
+        false
+    }
+}
+
 fn main() {
     // read config
     let token = env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN envar");
+    let mut client = Client::new(&token, Handler);
     let owners = {
         let mut owners = HashSet::default();
         owners.insert(serenity::http::get_current_application_info().expect("couldn't get application info").owner.id);
         owners
     };
-    let mut client = Client::new(&token, Handler);
     {
         let mut data = client.data.lock();
         data.insert::<Owners>(owners);
