@@ -6,20 +6,23 @@ extern crate kuchiki;
 extern crate mtg;
 extern crate reqwest;
 extern crate serenity;
+extern crate typemap;
 extern crate urlencoding;
 
 use std::{env, io, process};
+use std::collections::HashSet;
 use std::io::prelude::*;
-use std::str::FromStr;
 
 use kuchiki::traits::TendrilSink;
 
-use mtg::cards::Card;
+use mtg::card::Db;
 
 use serenity::builder::CreateEmbedField;
 use serenity::prelude::*;
-use serenity::model::{EmojiId, Guild, Message, Permissions, ReactionType, Ready};
+use serenity::model::{EmojiId, Guild, Message, Permissions, ReactionType, Ready, UserId};
 use serenity::utils::MessageBuilder;
+
+use typemap::Key;
 
 macro_rules! manamoji {
     ($($sym:expr => $name:expr, $id:expr;)+) => {
@@ -113,6 +116,18 @@ manamoji! {
     "{∞}" => "manainfinity", 386741125861605387;
 }
 
+struct CardDb;
+
+impl Key for CardDb {
+    type Value = Db;
+}
+
+struct Owners;
+
+impl Key for Owners {
+    type Value = HashSet<UserId>;
+}
+
 struct Handler;
 
 impl EventHandler for Handler {
@@ -130,10 +145,10 @@ impl EventHandler for Handler {
         println!("[ ** ] Connected to {}", guild.name);
     }
 
-    fn on_message(&self, _: Context, msg: Message) {
+    fn on_message(&self, ctx: Context, msg: Message) {
         if msg.author.bot { return; } // ignore bots to prevent message loops
         let current_user_id = serenity::CACHE.read().expect("failed to get serenity cache").user.id;
-        let query = if msg.content.starts_with(&current_user_id.mention()) { //TODO allow <@!id> mentions
+        let mut query = if msg.content.starts_with(&current_user_id.mention()) { //TODO allow <@!id> mentions
             let mut query = &msg.content[current_user_id.mention().len()..];
             if query.starts_with(':') { query = &query[1..]; }
             if query.starts_with(' ') { query = &query[1..]; }
@@ -143,6 +158,28 @@ impl EventHandler for Handler {
         } else {
             None
         };
+        if query.map_or(false, |q| q.starts_with('%')) {
+            // command
+            query = Some(&query.unwrap()[1..]);
+            if let Some(cmd_name) = eat_word(&mut query.unwrap()) {
+                match &cmd_name[..] {
+                    "quit" => {
+                        let data = ctx.data.lock();
+                        let owners = data.get::<Owners>().expect("missing owners set");
+                        if !owners.contains(&msg.author.id) {
+                            msg.reply("only owners can use this command").expect("failed to reply");
+                            return;
+                        }
+                        ctx.quit().expect("failed to quit");
+                        return;
+                    }
+                    _ => {
+                        msg.reply("unknown command").expect("failed to reply");
+                        return;
+                    }
+                }
+            }
+        }
         if let Some(query) = query {
             let encoded_query = urlencoding::encode(query);
             let mut response = reqwest::get(&format!("http://localhost:18803/list?q={}", encoded_query)).expect("failed to send Lore Seeker request");
@@ -164,7 +201,11 @@ impl EventHandler for Handler {
                 (Some(card_name), None) => {
                     let card_url = format!("https://loreseeker.fenhl.net/card?q=!{}", urlencoding::encode(&card_name)); //TODO use exact printing URL
                     let mut reply = msg.reply(&format!("1 card found: {}", card_url)).expect("failed to reply");
-                    let card = Card::from_str(&card_name).expect("card not found in database");
+                    let card = {
+                        let data = ctx.data.lock();
+                        let db = data.get::<CardDb>().expect("missing card database");
+                        db.card(&card_name).expect("card not found in database")
+                    };
                     reply.edit(|m| m
                         .embed(|e| e
                             .color(match card.rarity().color() {
@@ -210,15 +251,46 @@ impl EventHandler for Handler {
     }
 }
 
+fn eat_word(subj: &mut &str) -> Option<String> {
+    if let Some(word) = next_word(*subj) {
+        *subj = &subj[word.len()..];
+        while subj.starts_with(' ') { *subj = &subj[1..]; }
+        Some(word)
+    } else {
+        None
+    }
+}
+
+fn next_word(subj: &str) -> Option<String> {
+    let mut word = String::default();
+    for c in subj.chars() {
+        if c == ' ' { break; }
+        word.push(c);
+    }
+    if word.is_empty() { None } else { Some(word) }
+}
+
 fn main() {
     // read config
     let token = env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN envar");
-    // load cards before going online
-    print!("[....] loading cards");
-    io::stdout().flush().expect("failed to flush stdout");
-    assert!(Card::from_str("Dryad Arbor").expect("failed to load dummy card").loyalty().is_none());
-    println!("\r[ ok ] {} cards loaded", mtg::cards::Iter::default().count());
-    // connect to Discord
+    let owners = {
+        let mut owners = HashSet::default();
+        owners.insert(serenity::http::get_current_application_info().expect("couldn't get application info").owner.id);
+        owners
+    };
     let mut client = Client::new(&token, Handler);
+    {
+        let mut data = client.data.lock();
+        data.insert::<Owners>(owners);
+        // load cards before going online
+        print!("[....] loading cards");
+        io::stdout().flush().expect("failed to flush stdout");
+        let db = Db::from_sets_dir("/opt/git/github.com/fenhl/lore-seeker/stage/data/sets").expect("failed to load card database");
+        assert!(db.card("Dryad Arbor").expect("failed to load dummy card").loyalty().is_none());
+        let num_cards = db.into_iter().count();
+        data.insert::<CardDb>(db);
+        println!("\r[ ok ] {} cards loaded", num_cards);
+    }
+    // connect to Discord
     client.start_autosharded().expect("client error");
 }
