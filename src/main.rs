@@ -2,6 +2,7 @@
 #![deny(unused)]
 #![forbid(unused_extern_crates, unused_import_braces)]
 
+extern crate chrono;
 extern crate kuchiki;
 extern crate mtg;
 extern crate reqwest;
@@ -12,6 +13,9 @@ extern crate urlencoding;
 use std::{env, io, process};
 use std::collections::HashSet;
 use std::io::prelude::*;
+use std::sync::{PoisonError, RwLockReadGuard};
+
+use chrono::prelude::*;
 
 use kuchiki::traits::TendrilSink;
 
@@ -147,109 +151,63 @@ impl EventHandler for Handler {
 
     fn on_message(&self, ctx: Context, msg: Message) {
         if msg.author.bot { return; } // ignore bots to prevent message loops
-        let current_user_id = serenity::CACHE.read().expect("failed to get serenity cache").user.id;
-        let mut query = if msg.content.starts_with(&current_user_id.mention()) { //TODO allow <@!id> mentions
-            let mut query = &msg.content[current_user_id.mention().len()..];
-            if query.starts_with(':') { query = &query[1..]; }
-            if query.starts_with(' ') { query = &query[1..]; }
-            Some(query)
-        } else if msg.author.create_dm_channel().ok().map_or(false, |dm| dm.id == msg.channel_id) {
-            Some(&msg.content[..])
-        } else {
-            None
-        };
-        if query.map_or(false, |q| q.starts_with('%')) {
-            // command
-            query = Some(&query.unwrap()[1..]);
-            if let Some(cmd_name) = eat_word(&mut query.unwrap()) {
-                match &cmd_name[..] {
-                    "quit" => {
-                        if !owner_check(&ctx, &msg) { return; }
-                        ctx.quit().expect("failed to quit");
-                        return;
-                    }
-                    "update" => {
-                        if !owner_check(&ctx, &msg) { return; }
-                        let mut data = ctx.data.lock();
-                        let db = Db::from_sets_dir("/opt/git/github.com/fenhl/lore-seeker/stage/data/sets").expect("failed to load card database");
-                        data.insert::<CardDb>(db);
-                        return;
-                    }
-                    _ => {
-                        msg.reply("unknown command").expect("failed to reply");
-                        return;
-                    }
-                }
+        if let Some(err_reply) = match handle_message(ctx, &msg) {
+            Ok(()) => None,
+            Err(Error::OwnerCheck) => Some("this command can only be used by the bot owner".into()),
+            Err(Error::UnknownCommand(cmd)) => Some(MessageBuilder::default().push("unknown command: %").push_safe(cmd).build()),
+            Err(e) => {
+                println!("{}: Message handler returned error {:?}", Utc::now().format("%Y-%m-%d %H:%M:%S"), e);
+                Some("unknown error (cc <@86841168427495424>)".into())
             }
+        } {
+            msg.reply(&err_reply).expect("failed to send error reply");
         }
-        if let Some(query) = query {
-            let encoded_query = urlencoding::encode(query);
-            let mut response = reqwest::get(&format!("http://localhost:18803/list?q={}", encoded_query)).expect("failed to send Lore Seeker request");
-            if !response.status().is_success() {
-                panic!("Lore Seeker responded with status code {}", response.status());
-            }
-            let mut response_content = String::default();
-            response.read_to_string(&mut response_content).expect("failed to read Lore Seeker response");
-            let document = kuchiki::parse_html().one(response_content);
-            let mut matches = document.select("ul#search-result")
-                .expect("failed to parse Lore Seeker response")
-                .next()
-                .expect("failed to find search result in Lore Seeker response")
-                .as_node()
-                .children()
-                .filter_map(|node| node.first_child().and_then(|text_node| text_node.as_text().map(|text| text.borrow().trim().to_owned())));
-            match (matches.next(), matches.next()) {
-                (Some(_), Some(_)) => { msg.reply(&format!("{} cards found: https://loreseeker.fenhl.net/card?q={}", 2 + matches.count(), encoded_query)).expect("failed to reply"); }
-                (Some(card_name), None) => {
-                    let card_url = format!("https://loreseeker.fenhl.net/card?q=!{}", urlencoding::encode(&card_name)); //TODO use exact printing URL
-                    let mut reply = msg.reply(&format!("1 card found: {}", card_url)).expect("failed to reply");
-                    let card = {
-                        let data = ctx.data.lock();
-                        let db = data.get::<CardDb>().expect("missing card database");
-                        db.card(&card_name).expect("card not found in database")
-                    };
-                    reply.edit(|m| m
-                        .embed(|e| e
-                            .color(match card.rarity().color() {
-                                (0, 0, 0) => (1, 1, 1), // Discord turns actual black into light gray
-                                c => c
-                            })
-                            .title(format!("{} {}", card, with_manamoji(&card.mana_cost().map_or("".to_owned(), |cost| cost.to_string()))))
-                            .url(&card_url)
-                            .description(MessageBuilder::default()
-                                .push_bold_safe(&card.type_line()) //TODO color indicator
-                                .push("\n\n")
-                                .push(with_manamoji(&card.text())) //TODO add support for levelers, fix loyalty costs and quotes, italicize ability words and reminder text
-                            )
-                            .fields(
-                                (if let Some((pow, tou)) = card.pt() {
-                                    Some(CreateEmbedField::default().name("P/T").value(MessageBuilder::default().push_safe(pow).push("/").push_safe(tou)))
-                                } else {
-                                    None
-                                }).into_iter()
-                                .chain(if let Some(loy) = card.loyalty() {
-                                    Some(CreateEmbedField::default().name("Loyalty").value(loy))
-                                } else {
-                                    None
-                                })
-                                .chain(if let Some((hand, life)) = card.vanguard_modifiers() {
-                                    vec![
-                                        CreateEmbedField::default().name("Hand modifier").value(format!("{:+}", hand)),
-                                        CreateEmbedField::default().name("Life modifier").value(format!("{:+}", life))
-                                    ]
-                                } else {
-                                    Vec::default()
-                                })
-                            )
-                            //TODO printings
-                        )
-                    ).expect("failed to edit reply");
-                } //TODO reply with card stats & resolved Lore Seeker URL
-                (None, _) => { msg.reply("no cards found").expect("failed to reply"); }
-            }
-        } else if msg.content.contains("[[") && msg.content.contains("]]") {
-            //TODO card lookup
-        }
+    }
+}
+
+#[derive(Debug)]
+enum Error<'a> {
+    CssSelector,
+    Db(mtg::card::DbError),
+    Io(io::Error),
+    MissingCardDb,
+    MissingCardList,
+    NoSuchCard(String),
+    OwnerCheck,
+    Poison(PoisonError<RwLockReadGuard<'a, serenity::cache::Cache>>),
+    Reqwest(reqwest::Error),
+    ResponseStatus(reqwest::StatusCode),
+    Serenity(serenity::Error),
+    UnknownCommand(String)
+}
+
+impl<'a> From<PoisonError<RwLockReadGuard<'a, serenity::cache::Cache>>> for Error<'a> {
+    fn from(e: PoisonError<RwLockReadGuard<'a, serenity::cache::Cache>>) -> Error<'a> {
+        Error::Poison(e)
+    }
+}
+
+impl<'a> From<io::Error> for Error<'a> {
+    fn from(e: io::Error) -> Error<'a> {
+        Error::Io(e)
+    }
+}
+
+impl<'a> From<mtg::card::DbError> for Error<'a> {
+    fn from(e: mtg::card::DbError) -> Error<'a> {
+        Error::Db(e)
+    }
+}
+
+impl<'a> From<reqwest::Error> for Error<'a> {
+    fn from(e: reqwest::Error) -> Error<'a> {
+        Error::Reqwest(e)
+    }
+}
+
+impl<'a> From<serenity::Error> for Error<'a> {
+    fn from(e: serenity::Error) -> Error<'a> {
+        Error::Serenity(e)
     }
 }
 
@@ -261,6 +219,110 @@ fn eat_word(subj: &mut &str) -> Option<String> {
     } else {
         None
     }
+}
+
+fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
+    let current_user_id = serenity::CACHE.read()?.user.id;
+    let mut query = if msg.content.starts_with(&current_user_id.mention()) { //TODO allow <@!id> mentions
+        let mut query = &msg.content[current_user_id.mention().len()..];
+        if query.starts_with(':') { query = &query[1..]; }
+        if query.starts_with(' ') { query = &query[1..]; }
+        Some(query)
+    } else if msg.author.create_dm_channel().ok().map_or(false, |dm| dm.id == msg.channel_id) {
+        Some(&msg.content[..])
+    } else {
+        None
+    };
+    if query.map_or(false, |q| q.starts_with('%')) {
+        // command
+        query = Some(&query.unwrap()[1..]);
+        if let Some(cmd_name) = eat_word(&mut query.unwrap()) {
+            match &cmd_name[..] {
+                "quit" => {
+                    if !owner_check(&ctx, &msg) { return Err(Error::OwnerCheck); }
+                    ctx.quit()?;
+                    return Ok(());
+                }
+                "update" => {
+                    if !owner_check(&ctx, &msg) { return Err(Error::OwnerCheck); }
+                    let mut data = ctx.data.lock();
+                    let db = Db::from_sets_dir("/opt/git/github.com/fenhl/lore-seeker/stage/data/sets")?;
+                    data.insert::<CardDb>(db);
+                    return Ok(());
+                }
+                cmd => {
+                    return Err(Error::UnknownCommand(cmd.into()));
+                }
+            }
+        }
+    }
+    if let Some(query) = query {
+        let encoded_query = urlencoding::encode(query);
+        let mut response = reqwest::get(&format!("http://localhost:18803/list?q={}", encoded_query))?;
+        if !response.status().is_success() {
+            return Err(Error::ResponseStatus(response.status()));
+        }
+        let mut response_content = String::default();
+        response.read_to_string(&mut response_content)?;
+        let document = kuchiki::parse_html().one(response_content);
+        let mut matches = document.select("ul#search-result").map_err(|()| Error::CssSelector)?
+            .next().ok_or(Error::MissingCardList)?
+            .as_node()
+            .children()
+            .filter_map(|node| node.first_child().and_then(|text_node| text_node.as_text().map(|text| text.borrow().trim().to_owned())));
+        match (matches.next(), matches.next()) {
+            (Some(_), Some(_)) => { msg.reply(&format!("{} cards found: https://loreseeker.fenhl.net/card?q={}", 2 + matches.count(), encoded_query))?; }
+            (Some(card_name), None) => {
+                let card_url = format!("https://loreseeker.fenhl.net/card?q=!{}", urlencoding::encode(&card_name)); //TODO use exact printing URL
+                let mut reply = msg.reply(&format!("1 card found: {}", card_url))?;
+                let card = {
+                    let data = ctx.data.lock();
+                    let db = data.get::<CardDb>().ok_or(Error::MissingCardDb)?;
+                    db.card(&card_name).ok_or(Error::NoSuchCard(card_name.clone()))?
+                };
+                reply.edit(|m| m
+                    .embed(|e| e
+                        .color(match card.rarity().color() {
+                            (0, 0, 0) => (1, 1, 1), // Discord turns actual black into light gray
+                            c => c
+                        })
+                        .title(format!("{} {}", card, with_manamoji(&card.mana_cost().map_or("".to_owned(), |cost| cost.to_string()))))
+                        .url(&card_url)
+                        .description(MessageBuilder::default()
+                            .push_bold_safe(&card.type_line()) //TODO color indicator
+                            .push("\n\n")
+                            .push(with_manamoji(&card.text())) //TODO add support for levelers, fix loyalty costs and quotes, italicize ability words and reminder text
+                        )
+                        .fields(
+                            (if let Some((pow, tou)) = card.pt() {
+                                Some(CreateEmbedField::default().name("P/T").value(MessageBuilder::default().push_safe(pow).push("/").push_safe(tou)))
+                            } else {
+                                None
+                            }).into_iter()
+                            .chain(if let Some(loy) = card.loyalty() {
+                                Some(CreateEmbedField::default().name("Loyalty").value(loy))
+                            } else {
+                                None
+                            })
+                            .chain(if let Some((hand, life)) = card.vanguard_modifiers() {
+                                vec![
+                                    CreateEmbedField::default().name("Hand modifier").value(format!("{:+}", hand)),
+                                    CreateEmbedField::default().name("Life modifier").value(format!("{:+}", life))
+                                ]
+                            } else {
+                                Vec::default()
+                            })
+                        )
+                        //TODO printings
+                    )
+                )?;
+            } //TODO reply with card stats & resolved Lore Seeker URL
+            (None, _) => { msg.reply("no cards found")?; }
+        }
+    } else if msg.content.contains("[[") && msg.content.contains("]]") {
+        //TODO card lookup (https://github.com/fenhl/lore-seeker-discord/issues/2)
+    }
+    Ok(())
 }
 
 fn next_word(subj: &str) -> Option<String> {
