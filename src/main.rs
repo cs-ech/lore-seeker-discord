@@ -172,6 +172,7 @@ enum Error<'a> {
     Io(io::Error),
     MissingCardDb,
     MissingCardList,
+    MissingOwners,
     NoSuchCard(String),
     OwnerCheck,
     Poison(PoisonError<RwLockReadGuard<'a, serenity::cache::Cache>>),
@@ -239,12 +240,12 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
         if let Some(cmd_name) = eat_word(&mut query.unwrap()) {
             match &cmd_name[..] {
                 "quit" => {
-                    if !owner_check(&ctx, &msg) { return Err(Error::OwnerCheck); }
+                    owner_check(&ctx, &msg)?;
                     ctx.quit()?;
                     return Ok(());
                 }
                 "update" => {
-                    if !owner_check(&ctx, &msg) { return Err(Error::OwnerCheck); }
+                    owner_check(&ctx, &msg)?;
                     let mut data = ctx.data.lock();
                     let db = Db::from_sets_dir("/opt/git/github.com/fenhl/lore-seeker/stage/data/sets")?;
                     data.insert::<CardDb>(db);
@@ -334,14 +335,13 @@ fn next_word(subj: &str) -> Option<String> {
     if word.is_empty() { None } else { Some(word) }
 }
 
-fn owner_check(ctx: &Context, msg: &Message) -> bool {
+fn owner_check(ctx: &Context, msg: &Message) -> Result<(), Error<'static>> {
     let data = ctx.data.lock();
-    let owners = data.get::<Owners>().expect("missing owners set");
+    let owners = data.get::<Owners>().ok_or(Error::MissingOwners)?;
     if owners.contains(&msg.author.id) {
-        true
+        Ok(())
     } else {
-        msg.reply("only owners can use this command").expect("failed to reply");
-        false
+        Err(Error::OwnerCheck)
     }
 }
 
