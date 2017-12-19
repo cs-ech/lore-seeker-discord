@@ -153,7 +153,12 @@ impl EventHandler for Handler {
         if msg.author.bot { return; } // ignore bots to prevent message loops
         if let Some(err_reply) = match handle_message(ctx, &msg) {
             Ok(()) => None,
+            Err(Error::NoSuchCard(card_name)) => Some(MessageBuilder::default().push("error: no such card: ").push_safe(card_name).build()),
             Err(Error::OwnerCheck) => Some("this command can only be used by the bot owner".into()),
+            Err(Error::Reqwest(e)) => {
+                println!("{}: Message handler returned reqwest error {:?}", Utc::now().format("%Y-%m-%d %H:%M:%S"), e);
+                Some("failed to connect to Lore Seeker website, try again later".into()) //TODO check if lore-seeker screen is running
+            }
             Err(Error::UnknownCommand(cmd)) => Some(MessageBuilder::default().push("unknown command: %").push_safe(cmd).build()),
             Err(e) => {
                 println!("{}: Message handler returned error {:?}", Utc::now().format("%Y-%m-%d %H:%M:%S"), e);
@@ -320,7 +325,7 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
             } //TODO reply with card stats & resolved Lore Seeker URL
             (None, _) => { msg.reply("no cards found")?; }
         }
-    } else if msg.content.contains("[[") && msg.content.contains("]]") {
+    //} else if let (Some(start_idx), Some(end_idx)) = (msg.content.find("[["), msg.content.find("]]")) {
         //TODO card lookup (https://github.com/fenhl/lore-seeker-discord/issues/2)
     }
     Ok(())
