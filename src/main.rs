@@ -249,7 +249,7 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                     ctx.quit()?;
                     return Ok(());
                 }
-                "update" => {
+                "reload" | "update" => {
                     owner_check(&ctx, &msg)?;
                     let mut data = ctx.data.lock();
                     let db = Db::from_sets_dir("/opt/git/github.com/fenhl/lore-seeker/stage/data/sets")?;
