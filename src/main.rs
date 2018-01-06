@@ -1,6 +1,6 @@
 #![warn(trivial_casts)]
 #![deny(unused)]
-#![forbid(unused_extern_crates, unused_import_braces)]
+#![forbid(unused_import_braces)]
 
 extern crate chrono;
 extern crate kuchiki;
@@ -35,7 +35,8 @@ macro_rules! manamoji {
             match s {
                 $($sym => Some(ReactionType::Custom {
                     id: EmojiId($id),
-                    name: Some($name.to_owned())
+                    name: Some($name.to_owned()),
+                    animated: false
                 }),)+
                 _ => None
             }
@@ -48,7 +49,8 @@ macro_rules! manamoji {
                 for part in split {
                     s.push_str(&ReactionType::Custom {
                         id: EmojiId($id),
-                        name: Some($name.to_owned())
+                        name: Some($name.to_owned()),
+                        animated: false
                     }.to_string());
                     s.push_str(part);
                 }
