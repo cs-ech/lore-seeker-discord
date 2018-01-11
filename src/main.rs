@@ -256,6 +256,7 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                     let mut data = ctx.data.lock();
                     let db = Db::from_sets_dir("/opt/git/github.com/fenhl/lore-seeker/stage/data/sets")?;
                     data.insert::<CardDb>(db);
+                    msg.react("✅")?;
                     return Ok(());
                 }
                 cmd => {
