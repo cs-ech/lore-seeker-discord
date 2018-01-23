@@ -10,10 +10,10 @@ extern crate serenity;
 extern crate typemap;
 extern crate urlencoding;
 
-use std::{env, io, process};
+use std::{env, io};
 use std::collections::HashSet;
 use std::io::prelude::*;
-use std::sync::{PoisonError, RwLockReadGuard};
+use std::sync::{Arc, PoisonError, RwLockReadGuard};
 
 use chrono::prelude::*;
 
@@ -21,9 +21,13 @@ use kuchiki::traits::TendrilSink;
 
 use mtg::card::Db;
 
-use serenity::builder::CreateEmbedField;
+use serenity::client::bridge::gateway::ShardManager;
+use serenity::model::channel::{Message, ReactionType};
+use serenity::model::gateway::Ready;
+use serenity::model::guild::Guild;
+use serenity::model::id::{EmojiId, UserId};
+use serenity::model::permissions::Permissions;
 use serenity::prelude::*;
-use serenity::model::{EmojiId, Guild, Message, Permissions, ReactionType, Ready, UserId};
 use serenity::utils::MessageBuilder;
 
 use typemap::Key;
@@ -134,24 +138,37 @@ impl Key for Owners {
     type Value = HashSet<UserId>;
 }
 
+
+struct ShardManagerContainer;
+
+impl Key for ShardManagerContainer {
+    type Value = Arc<Mutex<ShardManager>>;
+}
+
+/// Utility function to shut down all shards.
+pub fn shut_down(ctx: &Context) {
+    let data = ctx.data.lock();
+    let mut shard_manager = data.get::<ShardManagerContainer>().expect("missing shard manager").lock();
+    shard_manager.shutdown_all();
+}
+
 struct Handler;
 
 impl EventHandler for Handler {
-    fn on_ready(&self, ctx: Context, ready: Ready) {
+    fn ready(&self, ctx: Context, ready: Ready) {
         let guilds = ready.user.guilds().expect("failed to get guilds");
         if guilds.is_empty() {
             println!("[!!!!] No guilds found, use following URL to invite the bot:");
             println!("[ ** ] {}", ready.user.invite_url(Permissions::READ_MESSAGES | Permissions::SEND_MESSAGES | Permissions::USE_EXTERNAL_EMOJIS).expect("failed to generate invite URL"));
-            ctx.quit().expect("failed to quit");
-            process::exit(1); //TODO (serenity 0.5.0) remove
+            shut_down(&ctx);
         }
     }
 
-    fn on_guild_create(&self, _: Context, guild: Guild, _: bool) {
+    fn guild_create(&self, _: Context, guild: Guild, _: bool) {
         println!("[ ** ] Connected to {}", guild.name);
     }
 
-    fn on_message(&self, ctx: Context, msg: Message) {
+    fn message(&self, ctx: Context, msg: Message) {
         if msg.author.bot { return; } // ignore bots to prevent message loops
         if let Some(err_reply) = match handle_message(ctx, &msg) {
             Ok(()) => None,
@@ -230,7 +247,7 @@ fn eat_word(subj: &mut &str) -> Option<String> {
 }
 
 fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
-    let current_user_id = serenity::CACHE.read()?.user.id;
+    let current_user_id = serenity::CACHE.read().user.id;
     let mut query = if msg.content.starts_with(&current_user_id.mention()) { //TODO allow <@!id> mentions
         let mut query = &msg.content[current_user_id.mention().len()..];
         if query.starts_with(':') { query = &query[1..]; }
@@ -248,7 +265,7 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
             match &cmd_name[..] {
                 "quit" => {
                     owner_check(&ctx, &msg)?;
-                    ctx.quit()?;
+                    shut_down(&ctx);
                     return Ok(());
                 }
                 "reload" | "update" => {
@@ -304,19 +321,19 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                         )
                         .fields(
                             (if let Some((pow, tou)) = card.pt() {
-                                Some(CreateEmbedField::default().name("P/T").value(MessageBuilder::default().push_safe(pow).push("/").push_safe(tou)))
+                                Some(("P/T", MessageBuilder::default().push_safe(pow).push("/").push_safe(tou).build(), true))
                             } else {
                                 None
                             }).into_iter()
                             .chain(if let Some(loy) = card.loyalty() {
-                                Some(CreateEmbedField::default().name("Loyalty").value(loy))
+                                Some(("Loyalty", loy.to_string(), true))
                             } else {
                                 None
                             })
                             .chain(if let Some((hand, life)) = card.vanguard_modifiers() {
                                 vec![
-                                    CreateEmbedField::default().name("Hand modifier").value(format!("{:+}", hand)),
-                                    CreateEmbedField::default().name("Life modifier").value(format!("{:+}", life))
+                                    (("Hand modifier", format!("{:+}", hand), true)),
+                                    (("Life modifier", format!("{:+}", life), true))
                                 ]
                             } else {
                                 Vec::default()
@@ -356,7 +373,7 @@ fn owner_check(ctx: &Context, msg: &Message) -> Result<(), Error<'static>> {
 fn main() {
     // read config
     let token = env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN envar");
-    let mut client = Client::new(&token, Handler);
+    let mut client = Client::new(&token, Handler).expect("failed to create serenity client");
     let owners = {
         let mut owners = HashSet::default();
         owners.insert(serenity::http::get_current_application_info().expect("couldn't get application info").owner.id);
@@ -365,6 +382,7 @@ fn main() {
     {
         let mut data = client.data.lock();
         data.insert::<Owners>(owners);
+        data.insert::<ShardManagerContainer>(Arc::clone(&client.shard_manager));
         // load cards before going online
         print!("[....] loading cards");
         io::stdout().flush().expect("failed to flush stdout");
