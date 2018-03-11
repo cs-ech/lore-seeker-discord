@@ -180,8 +180,10 @@ impl EventHandler for Handler {
         if msg.author.bot { return; } // ignore bots to prevent message loops
         if let Some(err_reply) = match handle_message(ctx, &msg) {
             Ok(()) => None,
+            Err(Error::MomirMissingCmc) => Some("missing CMC".into()),
             Err(Error::NoSuchCard(card_name)) => Some(MessageBuilder::default().push("error: no such card: ").push_safe(card_name).build()),
             Err(Error::OwnerCheck) => Some("this command can only be used by the bot owner".into()),
+            Err(Error::ParseInt(e)) => Some(MessageBuilder::default().push("invalid number: ").push_safe(e).build()),
             Err(Error::Reqwest(e)) => {
                 println!("{}: Message handler returned reqwest error {:?}", Utc::now().format("%Y-%m-%d %H:%M:%S"), e);
                 Some("failed to connect to Lore Seeker website, try again later".into()) //TODO check if lore-seeker screen is running
