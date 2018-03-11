@@ -357,13 +357,13 @@ fn handle_query(ctx: &Context, msg: &Message, query: &str, random: bool) -> Resu
     if random {
         let matches_vec = matches.collect::<Vec<_>>();
         if let Some(card_name) = thread_rng().choose(&matches_vec) {
-            show_single_card(&ctx, &msg, &format!("{} cards found, random card", matches_vec.len()), card_name)?;
+            show_single_card(&ctx, &msg, &format!("{} card{} found, random card", matches_vec.len(), if matches_vec.len() == 1 { "" } else { "s" }), card_name)?;
         } else {
             msg.reply("no cards found")?;
         }
     } else {
         match (matches.next(), matches.next()) {
-            (Some(_), Some(_)) => { msg.reply(&format!("{} cards found: https://loreseeker.fenhl.net/card?q={}", 2 + matches.count(), encoded_query))?; }
+            (Some(_), Some(_)) => { msg.reply(&format!("{} cards found: <https://loreseeker.fenhl.net/card?q={}>", 2 + matches.count(), encoded_query))?; }
             (Some(card_name), None) => {
                 show_single_card(&ctx, &msg, "1 card found", &card_name)?;
             }
@@ -403,7 +403,7 @@ fn owner_check(ctx: &Context, msg: &Message) -> Result<(), Error<'static>> {
 
 fn show_single_card(ctx: &Context, msg: &Message, reply_text: &str, card_name: &str) -> Result<(), Error<'static>> {
     let card_url = format!("https://loreseeker.fenhl.net/card?q=!{}", urlencoding::encode(card_name)); //TODO use exact printing URL
-    let mut reply = msg.reply(&format!("{}: {}", reply_text, card_url))?;
+    let mut reply = msg.reply(&format!("{}: <{}>", reply_text, card_url))?;
     let card = {
         let data = ctx.data.lock();
         let db = data.get::<CardDb>().ok_or(Error::MissingCardDb)?;
