@@ -28,7 +28,7 @@ use serenity::client::bridge::gateway::ShardManager;
 use serenity::model::channel::{Message, ReactionType};
 use serenity::model::gateway::Ready;
 use serenity::model::guild::Guild;
-use serenity::model::id::{EmojiId, UserId};
+use serenity::model::id::{ChannelId, EmojiId, UserId};
 use serenity::model::permissions::Permissions;
 use serenity::prelude::*;
 use serenity::utils::MessageBuilder;
@@ -135,12 +135,17 @@ impl Key for CardDb {
     type Value = Db;
 }
 
+struct InlineChannels;
+
+impl Key for InlineChannels {
+    type Value = HashSet<ChannelId>;
+}
+
 struct Owners;
 
 impl Key for Owners {
     type Value = HashSet<UserId>;
 }
-
 
 struct ShardManagerContainer;
 
@@ -199,6 +204,7 @@ enum Error<'a> {
     Io(io::Error),
     MissingCardDb,
     MissingCardList,
+    MissingInlineChannels,
     MissingOwners,
     NoSuchCard(String),
     OwnerCheck,
@@ -265,7 +271,7 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
     if query.map_or(false, |q| q.starts_with('%')) {
         // command
         query = Some(&query.unwrap()[1..]);
-        if let Some(cmd_name) = eat_word(&mut query.unwrap()) {
+        if let Some(cmd_name) = eat_word(&mut query.unwrap()) { //TODO fix word not actually being eaten
             match &cmd_name[..] {
                 "quit" => {
                     owner_check(&ctx, &msg)?;
@@ -319,8 +325,24 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
             }
             (None, _) => { msg.reply("no cards found")?; }
         }
-    //} else if let (Some(start_idx), Some(end_idx)) = (msg.content.find("[["), msg.content.find("]]")) {
-        //TODO card lookup (https://github.com/fenhl/lore-seeker-discord/issues/2)
+    } else if let (Some(start_idx), Some(end_idx)) = (msg.content.find("[["), msg.content.find("]]")) {
+        let ctx_data = ctx.data.lock();
+        if start_idx < end_idx && ctx_data.get::<InlineChannels>().ok_or(Error::MissingInlineChannels)?.contains(&msg.channel_id) {
+            let db = ctx_data.get::<CardDb>().ok_or(Error::MissingCardDb)?;
+            let mut query = &msg.content[start_idx + 2..end_idx];
+            let set_code = if let Some(colon_idx) = query.find(":") {
+                let set_code = &query[..colon_idx];
+                if db.set_codes().contains(set_code) {
+                    query = &query[colon_idx + 1..];
+                    Some(set_code)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            let _ /*TODO reply depending on number of matches, like above*/ = db.card_fuzzy(query, set_code);
+        }
     }
     Ok(())
 }
@@ -403,6 +425,7 @@ fn main() {
     {
         let mut data = client.data.lock();
         data.insert::<Owners>(owners);
+        data.insert::<InlineChannels>(HashSet::new()); //TODO read config
         data.insert::<ShardManagerContainer>(Arc::clone(&client.shard_manager));
         // load cards before going online
         print!("[....] loading cards");
