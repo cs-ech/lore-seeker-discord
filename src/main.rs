@@ -258,20 +258,20 @@ fn eat_word(subj: &mut &str) -> Option<String> {
 fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
     let current_user_id = serenity::CACHE.read().user.id;
     let mut random = false;
-    let mut query = if msg.content.starts_with(&current_user_id.mention()) { //TODO allow <@!id> mentions
+    let query = &mut if msg.content.starts_with(&current_user_id.mention()) { //TODO allow <@!id> mentions
         let mut query = &msg.content[current_user_id.mention().len()..];
         if query.starts_with(':') { query = &query[1..]; }
         if query.starts_with(' ') { query = &query[1..]; }
-        Some(query)
+        query
     } else if msg.author.create_dm_channel().ok().map_or(false, |dm| dm.id == msg.channel_id) {
-        Some(&msg.content[..])
+        &msg.content[..]
     } else {
-        None
+        ""
     };
-    if query.map_or(false, |q| q.starts_with('%')) {
+    if query.starts_with('%') {
         // command
-        query = Some(&query.unwrap()[1..]);
-        if let Some(cmd_name) = eat_word(&mut query.unwrap()) { //TODO fix word not actually being eaten
+        *query = &query[1..];
+        if let Some(cmd_name) = eat_word(query) {
             match &cmd_name[..] {
                 "quit" => {
                     owner_check(&ctx, &msg)?;
@@ -295,7 +295,7 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
             }
         }
     }
-    if let Some(query) = query {
+    if query.len() > 0 {
         let encoded_query = urlencoding::encode(query);
         let mut response = reqwest::get(&format!("http://localhost:18803/list?q={}", encoded_query))?;
         if !response.status().is_success() {
