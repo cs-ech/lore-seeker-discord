@@ -206,8 +206,10 @@ enum Error<'a> {
     MissingCardList,
     MissingInlineChannels,
     MissingOwners,
+    MomirMissingCmc,
     NoSuchCard(String),
     OwnerCheck,
+    ParseInt(std::num::ParseIntError),
     Poison(PoisonError<RwLockReadGuard<'a, serenity::cache::Cache>>),
     Reqwest(reqwest::Error),
     ResponseStatus(reqwest::StatusCode),
@@ -218,6 +220,12 @@ enum Error<'a> {
 impl<'a> From<PoisonError<RwLockReadGuard<'a, serenity::cache::Cache>>> for Error<'a> {
     fn from(e: PoisonError<RwLockReadGuard<'a, serenity::cache::Cache>>) -> Error<'a> {
         Error::Poison(e)
+    }
+}
+
+impl<'a> From<std::num::ParseIntError> for Error<'a> {
+    fn from(e: std::num::ParseIntError) -> Error<'a> {
+        Error::ParseInt(e)
     }
 }
 
@@ -257,7 +265,6 @@ fn eat_word(subj: &mut &str) -> Option<String> {
 
 fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
     let current_user_id = serenity::CACHE.read().user.id;
-    let mut random = false;
     let query = &mut if msg.content.starts_with(&current_user_id.mention()) { //TODO allow <@!id> mentions
         let mut query = &msg.content[current_user_id.mention().len()..];
         if query.starts_with(':') { query = &query[1..]; }
@@ -279,7 +286,7 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                     return Ok(());
                 }
                 "rand" | "random" => {
-                    random = true;
+                    return handle_query(&ctx, msg, query, true);
                 }
                 "reload" | "update" => {
                     owner_check(&ctx, &msg)?;
@@ -289,42 +296,28 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                     msg.react("✅")?;
                     return Ok(());
                 }
+                "momir" => {
+                    // fusion Momir, for real cards
+                    let cmc = eat_word(query).ok_or(Error::MomirMissingCmc)?.parse::<usize>()?;
+                    return momir(&ctx, msg, cmc, Some(false));
+                }
+                "cmomir" => {
+                    // fusion Momir, for custom cards
+                    let cmc = eat_word(query).ok_or(Error::MomirMissingCmc)?.parse::<usize>()?;
+                    return momir(&ctx, msg, cmc, Some(true));
+                }
+                "fmomir" => {
+                    // fusion Momir, for both real and custom cards
+                    let cmc = eat_word(query).ok_or(Error::MomirMissingCmc)?.parse::<usize>()?;
+                    return momir(&ctx, msg, cmc, None);
+                }
                 cmd => {
                     return Err(Error::UnknownCommand(cmd.into()));
                 }
             }
         }
-    }
-    if query.len() > 0 {
-        let encoded_query = urlencoding::encode(query);
-        let mut response = reqwest::get(&format!("http://localhost:18803/list?q={}", encoded_query))?;
-        if !response.status().is_success() {
-            return Err(Error::ResponseStatus(response.status()));
-        }
-        let mut response_content = String::default();
-        response.read_to_string(&mut response_content)?;
-        let document = kuchiki::parse_html().one(response_content);
-        let mut matches = document.select("ul#search-result").map_err(|()| Error::CssSelector)?
-            .next().ok_or(Error::MissingCardList)?
-            .as_node()
-            .children()
-            .filter_map(|node| node.first_child().and_then(|text_node| text_node.as_text().map(|text| text.borrow().trim().to_owned())));
-        if random {
-            let matches_vec = matches.collect::<Vec<_>>();
-            if let Some(card_name) = thread_rng().choose(&matches_vec) {
-                show_single_card(&ctx, &msg, &format!("{} cards found, random card", matches_vec.len()), card_name)?;
-            } else {
-                msg.reply("no cards found")?;
-            }
-            return Ok(());
-        }
-        match (matches.next(), matches.next()) {
-            (Some(_), Some(_)) => { msg.reply(&format!("{} cards found: https://loreseeker.fenhl.net/card?q={}", 2 + matches.count(), encoded_query))?; }
-            (Some(card_name), None) => {
-                show_single_card(&ctx, &msg, "1 card found", &card_name)?;
-            }
-            (None, _) => { msg.reply("no cards found")?; }
-        }
+    } else if query.len() > 0 {
+        handle_query(&ctx, msg, query, false)?;
     } else if let (Some(start_idx), Some(end_idx)) = (msg.content.find("[["), msg.content.find("]]")) {
         let ctx_data = ctx.data.lock();
         if start_idx < end_idx && ctx_data.get::<InlineChannels>().ok_or(Error::MissingInlineChannels)?.contains(&msg.channel_id) {
@@ -345,6 +338,48 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
         }
     }
     Ok(())
+}
+
+fn handle_query(ctx: &Context, msg: &Message, query: &str, random: bool) -> Result<(), Error<'static>> {
+    let encoded_query = urlencoding::encode(query);
+    let mut response = reqwest::get(&format!("http://localhost:18803/list?q={}", encoded_query))?;
+    if !response.status().is_success() {
+        return Err(Error::ResponseStatus(response.status()));
+    }
+    let mut response_content = String::default();
+    response.read_to_string(&mut response_content)?;
+    let document = kuchiki::parse_html().one(response_content);
+    let mut matches = document.select("ul#search-result").map_err(|()| Error::CssSelector)?
+        .next().ok_or(Error::MissingCardList)?
+        .as_node()
+        .children()
+        .filter_map(|node| node.first_child().and_then(|text_node| text_node.as_text().map(|text| text.borrow().trim().to_owned())));
+    if random {
+        let matches_vec = matches.collect::<Vec<_>>();
+        if let Some(card_name) = thread_rng().choose(&matches_vec) {
+            show_single_card(&ctx, &msg, &format!("{} cards found, random card", matches_vec.len()), card_name)?;
+        } else {
+            msg.reply("no cards found")?;
+        }
+    } else {
+        match (matches.next(), matches.next()) {
+            (Some(_), Some(_)) => { msg.reply(&format!("{} cards found: https://loreseeker.fenhl.net/card?q={}", 2 + matches.count(), encoded_query))?; }
+            (Some(card_name), None) => {
+                show_single_card(&ctx, &msg, "1 card found", &card_name)?;
+            }
+            (None, _) => { msg.reply("no cards found")?; }
+        }
+    }
+    Ok(())
+}
+
+fn momir(ctx: &Context, msg: &Message, cmc: usize, custom: Option<bool>) -> Result<(), Error<'static>> {
+    let query = format!("is:primary t:creature cmc={} {}", cmc, match custom {
+        Some(true) => "is:custom",
+        Some(false) => "f:Vintage",
+        None => "(is:custom or f:Vintage)"
+    });
+    handle_query(ctx, msg, &query, true)
 }
 
 fn next_word(subj: &str) -> Option<String> {
