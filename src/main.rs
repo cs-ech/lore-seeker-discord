@@ -444,7 +444,13 @@ fn show_single_card(ctx: &Context, msg: &Message, reply_text: &str, card_name: &
                     Vec::default()
                 })
             )
-            //TODO printings
+            .footer(|f| f.text(
+                card.printings()
+                    .into_iter()
+                    .map(|printing| format!("{}-{}", printing.set, printing.rarity.short()))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
         )
     )?;
     Ok(())
