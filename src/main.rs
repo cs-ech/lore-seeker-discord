@@ -11,10 +11,21 @@ extern crate serenity;
 extern crate typemap;
 extern crate urlencoding;
 
-use std::{env, io};
-use std::collections::HashSet;
-use std::io::prelude::*;
-use std::sync::{Arc, PoisonError, RwLockReadGuard};
+use std::{
+    collections::HashSet,
+    env,
+    io::{
+        self,
+        prelude::*
+    },
+    net::TcpListener,
+    sync::{
+        Arc,
+        PoisonError,
+        RwLockReadGuard
+    },
+    thread
+};
 
 use chrono::prelude::*;
 
@@ -22,18 +33,35 @@ use kuchiki::traits::TendrilSink;
 
 use mtg::card::Db;
 
-use rand::{Rng, thread_rng};
+use rand::{
+    Rng,
+    thread_rng
+};
 
-use serenity::client::bridge::gateway::ShardManager;
-use serenity::model::channel::{Message, ReactionType};
-use serenity::model::gateway::Ready;
-use serenity::model::guild::Guild;
-use serenity::model::id::{ChannelId, EmojiId, UserId};
-use serenity::model::permissions::Permissions;
-use serenity::prelude::*;
-use serenity::utils::MessageBuilder;
+use serenity::{
+    client::bridge::gateway::ShardManager,
+    model::{
+        channel::{
+            Message,
+            ReactionType
+        },
+        gateway::Ready,
+        guild::Guild,
+        id::{
+            ChannelId,
+            EmojiId,
+            UserId
+        },
+        permissions::Permissions
+    },
+    prelude::*,
+    utils::MessageBuilder
+};
 
-use typemap::Key;
+use typemap::{
+    Key,
+    ShareMap
+};
 
 macro_rules! manamoji {
     ($($sym:expr => $name:expr, $id:expr;)+) => {
@@ -200,9 +228,10 @@ impl EventHandler for Handler {
 }
 
 #[derive(Debug)]
-enum Error<'a> {
+enum Error {
     CssSelector,
     Db(mtg::card::DbError),
+    Env(env::VarError),
     Io(io::Error),
     MissingCardDb,
     MissingCardList,
@@ -212,45 +241,51 @@ enum Error<'a> {
     NoSuchCard(String),
     OwnerCheck,
     ParseInt(std::num::ParseIntError),
-    Poison(PoisonError<RwLockReadGuard<'a, serenity::cache::Cache>>),
+    Poison,
     Reqwest(reqwest::Error),
     ResponseStatus(reqwest::StatusCode),
     Serenity(serenity::Error),
     UnknownCommand(String)
 }
 
-impl<'a> From<PoisonError<RwLockReadGuard<'a, serenity::cache::Cache>>> for Error<'a> {
-    fn from(e: PoisonError<RwLockReadGuard<'a, serenity::cache::Cache>>) -> Error<'a> {
-        Error::Poison(e)
+impl<'a> From<PoisonError<RwLockReadGuard<'a, serenity::cache::Cache>>> for Error {
+    fn from(_: PoisonError<RwLockReadGuard<'a, serenity::cache::Cache>>) -> Error {
+        Error::Poison
     }
 }
 
-impl<'a> From<std::num::ParseIntError> for Error<'a> {
-    fn from(e: std::num::ParseIntError) -> Error<'a> {
+impl From<std::num::ParseIntError> for Error {
+    fn from(e: std::num::ParseIntError) -> Error {
         Error::ParseInt(e)
     }
 }
 
-impl<'a> From<io::Error> for Error<'a> {
-    fn from(e: io::Error) -> Error<'a> {
+impl From<env::VarError> for Error {
+    fn from(e: env::VarError) -> Error {
+        Error::Env(e)
+    }
+}
+
+impl From<io::Error> for Error {
+    fn from(e: io::Error) -> Error {
         Error::Io(e)
     }
 }
 
-impl<'a> From<mtg::card::DbError> for Error<'a> {
-    fn from(e: mtg::card::DbError) -> Error<'a> {
+impl From<mtg::card::DbError> for Error {
+    fn from(e: mtg::card::DbError) -> Error {
         Error::Db(e)
     }
 }
 
-impl<'a> From<reqwest::Error> for Error<'a> {
-    fn from(e: reqwest::Error) -> Error<'a> {
+impl From<reqwest::Error> for Error {
+    fn from(e: reqwest::Error) -> Error {
         Error::Reqwest(e)
     }
 }
 
-impl<'a> From<serenity::Error> for Error<'a> {
-    fn from(e: serenity::Error) -> Error<'a> {
+impl From<serenity::Error> for Error {
+    fn from(e: serenity::Error) -> Error {
         Error::Serenity(e)
     }
 }
@@ -293,8 +328,7 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                 "reload" | "update" => {
                     owner_check(&ctx, &msg)?;
                     let mut data = ctx.data.lock();
-                    let db = Db::from_sets_dir("/opt/git/github.com/fenhl/lore-seeker/stage/data/sets")?;
-                    data.insert::<CardDb>(db);
+                    reload_db(&mut data)?;
                     msg.react("✅")?;
                     return Ok(());
                 }
@@ -342,7 +376,7 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
     Ok(())
 }
 
-fn handle_query(ctx: &Context, msg: &Message, query: &str, random: bool) -> Result<(), Error<'static>> {
+fn handle_query(ctx: &Context, msg: &Message, query: &str, random: bool) -> Result<(), Error> {
     let encoded_query = urlencoding::encode(query);
     let mut response = reqwest::get(&format!("http://localhost:18803/list?q={}", encoded_query))?;
     if !response.status().is_success() {
@@ -375,7 +409,7 @@ fn handle_query(ctx: &Context, msg: &Message, query: &str, random: bool) -> Resu
     Ok(())
 }
 
-fn momir(ctx: &Context, msg: &Message, cmc: usize, custom: Option<bool>) -> Result<(), Error<'static>> {
+fn momir(ctx: &Context, msg: &Message, cmc: usize, custom: Option<bool>) -> Result<(), Error> {
     let query = format!("is:primary t:creature cmc={} {}", cmc, match custom {
         Some(true) => "is:custom",
         Some(false) => "f:Vintage",
@@ -393,7 +427,7 @@ fn next_word(subj: &str) -> Option<String> {
     if word.is_empty() { None } else { Some(word) }
 }
 
-fn owner_check(ctx: &Context, msg: &Message) -> Result<(), Error<'static>> {
+fn owner_check(ctx: &Context, msg: &Message) -> Result<(), Error> {
     let data = ctx.data.lock();
     let owners = data.get::<Owners>().ok_or(Error::MissingOwners)?;
     if owners.contains(&msg.author.id) {
@@ -403,7 +437,13 @@ fn owner_check(ctx: &Context, msg: &Message) -> Result<(), Error<'static>> {
     }
 }
 
-fn show_single_card(ctx: &Context, msg: &Message, reply_text: &str, card_name: &str) -> Result<(), Error<'static>> {
+fn reload_db(ctx_data: &mut ShareMap) -> Result<(), Error> {
+    let db = Db::from_sets_dir("/opt/git/github.com/fenhl/lore-seeker/stage/data/sets")?;
+    ctx_data.insert::<CardDb>(db);
+    Ok(())
+}
+
+fn show_single_card(ctx: &Context, msg: &Message, reply_text: &str, card_name: &str) -> Result<(), Error> {
     let card_url = format!("https://loreseeker.fenhl.net/card?q=!{}", urlencoding::encode(card_name)); //TODO use exact printing URL
     let mut reply = msg.reply(&format!("{}: <{}>", reply_text, card_url))?;
     let card = {
@@ -456,13 +496,13 @@ fn show_single_card(ctx: &Context, msg: &Message, reply_text: &str, card_name: &
     Ok(())
 }
 
-fn main() {
+fn main() -> Result<(), Error> {
     // read config
-    let token = env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN envar");
-    let mut client = Client::new(&token, Handler).expect("failed to create serenity client");
+    let token = env::var("DISCORD_TOKEN")?;
+    let mut client = Client::new(&token, Handler)?;
     let owners = {
         let mut owners = HashSet::default();
-        owners.insert(serenity::http::get_current_application_info().expect("couldn't get application info").owner.id);
+        owners.insert(serenity::http::get_current_application_info()?.owner.id);
         owners
     };
     {
@@ -472,13 +512,33 @@ fn main() {
         data.insert::<ShardManagerContainer>(Arc::clone(&client.shard_manager));
         // load cards before going online
         print!("[....] loading cards");
-        io::stdout().flush().expect("failed to flush stdout");
-        let db = Db::from_sets_dir("/opt/git/github.com/fenhl/lore-seeker/stage/data/sets").expect("failed to load card database");
-        assert!(db.card("Dryad Arbor").expect("failed to load dummy card").loyalty().is_none());
+        io::stdout().flush()?;
+        let db = Db::from_sets_dir("/opt/git/github.com/fenhl/lore-seeker/stage/data/sets")?;
+        assert!(db.card("Dryad Arbor").ok_or(Error::NoSuchCard("Dryad Arbor".to_owned()))?.loyalty().is_none());
         let num_cards = db.into_iter().count();
         data.insert::<CardDb>(db);
         println!("\r[ ok ] {} cards loaded", num_cards);
     }
+    // listen for IPC commands
+    {
+        let client_data = client.data.clone();
+        thread::spawn(move || -> Result<(), _> { //TODO change to Result<!, _>
+            for stream in TcpListener::bind("127.0.0.1:18806")?.incoming() {
+                let mut stream = stream?;
+                let mut buf = String::default();
+                stream.read_to_string(&mut buf)?;
+                match buf.trim() {
+                    "reload" => {
+                        let mut data = client_data.lock();
+                        reload_db(&mut data)?;
+                    }
+                    s => { return Err(Error::UnknownCommand(s.to_owned())); }
+                }
+            }
+            unreachable!();
+        });
+    }
     // connect to Discord
-    client.start_autosharded().expect("client error");
+    client.start_autosharded()?;
+    Ok(())
 }
