@@ -379,13 +379,15 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
 
 fn handle_query(ctx: &Context, msg: &Message, query: &str, random: bool) -> Result<(), Error> {
     let encoded_query = urlencoding::encode(query);
-    let mut response = reqwest::get(&format!("http://localhost:18803/list?q={}", encoded_query))?;
-    if !response.status().is_success() {
-        return Err(Error::ResponseStatus(response.status()));
-    }
-    let mut response_content = String::default();
-    response.read_to_string(&mut response_content)?;
-    let document = kuchiki::parse_html().one(response_content);
+    let document = {
+        let mut response = reqwest::get(&format!("http://localhost:18803/list?q={}", encoded_query))?;
+        if !response.status().is_success() {
+            return Err(Error::ResponseStatus(response.status()));
+        }
+        let mut response_content = String::default();
+        response.read_to_string(&mut response_content)?;
+        kuchiki::parse_html().one(response_content)
+    };
     let mut matches = document.select("ul#search-result").map_err(|()| Error::CssSelector)?
         .next().ok_or(Error::MissingCardList)?
         .as_node()
