@@ -77,7 +77,8 @@ macro_rules! manamoji {
             }
         }
 
-        fn with_manamoji(s: &str) -> String {
+        fn with_manamoji<S: ToString>(s: S) -> String {
+            let s = s.to_string();
             $(
                 let mut split = s.split($sym);
                 let mut s = split.next().expect("failed to convert manamoji").to_owned();
@@ -457,7 +458,11 @@ fn show_single_card(ctx: &Context, msg: &Message, reply_text: &str, card_name: &
                 (0, 0, 0) => (1, 1, 1), // Discord turns actual black into light gray
                 c => c
             })
-            .title(format!("{} {}", card, with_manamoji(&card.mana_cost().map_or("".to_owned(), |cost| cost.to_string()))))
+            .title(if let Some(cost) = card.mana_cost() {
+                format!("{} {}", card, with_manamoji(cost))
+            } else {
+                card.to_string()
+            })
             .url(&card_url)
             .description(MessageBuilder::default()
                 .push_bold_safe(&card.type_line()) //TODO color indicator
@@ -485,11 +490,15 @@ fn show_single_card(ctx: &Context, msg: &Message, reply_text: &str, card_name: &
                 })
             )
             .footer(|f| f.text(
-                card.printings()
-                    .into_iter()
-                    .map(|printing| format!("{}-{}", printing.set, printing.rarity.short()))
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                if card.num_printings() >= 100 {
+                    format!("{} printings", card.num_printings())
+                } else {
+                    card.printings()
+                        .into_iter()
+                        .map(|printing| format!("{}-{}", printing.set, printing.rarity.short()))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                }
             ))
         )
     )?;
