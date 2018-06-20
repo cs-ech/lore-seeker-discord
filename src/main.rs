@@ -16,6 +16,7 @@ extern crate urlencoding;
 use std::{
     collections::HashSet,
     env,
+    fmt,
     fs::File,
     io::{
         self,
@@ -435,7 +436,7 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
         handle_query(&ctx, msg, query, false)?;
     } else if let (Some(start_idx), Some(end_idx)) = (msg.content.find("[["), msg.content.find("]]")) {
         let ctx_data = ctx.data.lock();
-        if start_idx < end_idx && is_inline_channel {
+        if is_inline_channel && start_idx < end_idx {
             let db = ctx_data.get::<CardDb>().ok_or(Error::MissingCardDb)?;
             let mut query = &msg.content[start_idx + 2..end_idx];
             let set_code = if let Some(colon_idx) = query.find(":") {
@@ -449,7 +450,8 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
             } else {
                 None
             };
-            let _ /*TODO reply depending on number of matches, like above*/ = db.card_fuzzy(query, set_code);
+            let matches = db.card_fuzzy(query, set_code).into_iter().map(|card| card.to_string());
+            handle_query_result(&ctx, msg, matches, false, format!("!{}", urlencoding::encode(query)))?;
         }
     }
     Ok(())
@@ -466,15 +468,20 @@ fn handle_query(ctx: &Context, msg: &Message, query: &str, random: bool) -> Resu
         response.read_to_string(&mut response_content)?;
         kuchiki::parse_html().one(response_content)
     };
-    let mut matches = document.select("ul#search-result").map_err(|()| Error::CssSelector)?
+    let matches = document.select("ul#search-result").map_err(|()| Error::CssSelector)?
         .next().ok_or(Error::MissingCardList)?
         .as_node()
         .children()
         .filter_map(|node| node.first_child().and_then(|text_node| text_node.as_text().map(|text| text.borrow().trim().to_owned())));
+    handle_query_result(ctx, msg, matches, random, encoded_query)
+}
+
+fn handle_query_result(ctx: &Context, msg: &Message, matches: impl IntoIterator<Item = String>, random: bool, encoded_query: impl fmt::Display) -> Result<(), Error> {
+    let mut matches = matches.into_iter();
     if random {
         let matches_vec = matches.collect::<Vec<_>>();
         if let Some(card_name) = thread_rng().choose(&matches_vec) {
-            show_single_card(&ctx, &msg, &format!("{} card{} found, random card", matches_vec.len(), if matches_vec.len() == 1 { "" } else { "s" }), card_name)?;
+            show_single_card(ctx, msg, &format!("{} card{} found, random card", matches_vec.len(), if matches_vec.len() == 1 { "" } else { "s" }), card_name)?;
         } else {
             msg.reply("no cards found")?;
         }
@@ -482,7 +489,7 @@ fn handle_query(ctx: &Context, msg: &Message, query: &str, random: bool) -> Resu
         match (matches.next(), matches.next()) {
             (Some(_), Some(_)) => { msg.reply(&format!("{} cards found: <https://loreseeker.fenhl.net/card?q={}>", 2 + matches.count(), encoded_query))?; }
             (Some(card_name), None) => {
-                show_single_card(&ctx, &msg, "1 card found", &card_name)?;
+                show_single_card(ctx, msg, "1 card found", &card_name)?;
             }
             (None, _) => { msg.reply("no cards found")?; }
         }
