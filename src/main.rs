@@ -19,6 +19,7 @@ use std::{
         prelude::*
     },
     net::TcpListener,
+    str::FromStr,
     sync::{
         Arc,
         PoisonError,
@@ -291,10 +292,35 @@ impl From<serenity::Error> for Error {
     }
 }
 
+fn eat_user_mention(subj: &mut &str) -> Option<UserId> {
+    if !subj.starts_with('<') || !subj.contains('>') {
+        return None;
+    }
+    let mut maybe_mention = String::default();
+    let mut chars = subj.chars();
+    while let Some(c) = chars.next() {
+        maybe_mention.push(c);
+        if c == '>' {
+            if let Ok(id) = UserId::from_str(&maybe_mention) {
+                *subj = &subj[maybe_mention.len()..]; // consume mention text
+                return Some(id);
+            }
+            return None;
+        }
+    }
+    None
+}
+
+fn eat_whitespace(subj: &mut &str) {
+    while subj.starts_with(' ') {
+        *subj = &subj[1..];
+    }
+}
+
 fn eat_word(subj: &mut &str) -> Option<String> {
     if let Some(word) = next_word(*subj) {
         *subj = &subj[word.len()..];
-        while subj.starts_with(' ') { *subj = &subj[1..]; }
+        eat_whitespace(subj);
         Some(word)
     } else {
         None
@@ -333,13 +359,40 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                     msg.react("✅")?;
                     return Ok(());
                 }
+                "mjt" => {
+                    // Mental Judge Tower, for real cards
+                    let mut players = Vec::default();
+                    while let Some(user_id) = eat_user_mention(query) {
+                        players.push(user_id);
+                        eat_whitespace(query);
+                    }
+                    return mental_judge_tower(&msg, players, Some(false));
+                }
+                "cmjt" => {
+                    // custom Mental Judge Tower, for custom cards
+                    let mut players = Vec::default();
+                    while let Some(user_id) = eat_user_mention(query) {
+                        players.push(user_id);
+                        eat_whitespace(query);
+                    }
+                    return mental_judge_tower(&msg, players, Some(true));
+                }
+                "fmjt" => {
+                    // fusion Mental Judge Tower, for both real and custom cards
+                    let mut players = Vec::default();
+                    while let Some(user_id) = eat_user_mention(query) {
+                        players.push(user_id);
+                        eat_whitespace(query);
+                    }
+                    return mental_judge_tower(&msg, players, None);
+                }
                 "momir" => {
-                    // fusion Momir, for real cards
+                    // Momir, for real cards
                     let cmc = eat_word(query).ok_or(Error::MomirMissingCmc)?.parse::<usize>()?;
                     return momir(&ctx, msg, cmc, Some(false));
                 }
                 "cmomir" => {
-                    // fusion Momir, for custom cards
+                    // custom Momir, for custom cards
                     let cmc = eat_word(query).ok_or(Error::MomirMissingCmc)?.parse::<usize>()?;
                     return momir(&ctx, msg, cmc, Some(true));
                 }
@@ -409,6 +462,32 @@ fn handle_query(ctx: &Context, msg: &Message, query: &str, random: bool) -> Resu
             (None, _) => { msg.reply("no cards found")?; }
         }
     }
+    Ok(())
+}
+
+fn mental_judge_tower(msg: &Message, mut players: Vec<UserId>, custom: Option<bool>) -> Result<(), Error> {
+    let mut builder = MessageBuilder::default();
+    let mut gen = thread_rng();
+    if !players.is_empty() {
+        gen.shuffle(&mut players);
+        for (i, player) in players.into_iter().enumerate() {
+            builder = builder
+                .push(if i == 0 { "turn order: " } else { ", " })
+                .mention(&player);
+        }
+        builder = builder.push("\n");
+    }
+    builder = builder.push(format!(
+        "seed: <https://loreseeker.fenhl.net/card?q={}+is%3Aprimary+not%3Areprint+sort%3Arand+%28%28-layout%3Asplit+-layout%3Aaftermath%29+or+number%3A%2Fa%2F%29&random_seed={:08x}{:08x}>",
+        match custom {
+            Some(true) => "st%3Acustom",
+            Some(false) => "%28f%3AVintage+or+%28banned%3AVintage+-o%3A%2F%5CWante%5CW%2F+-o%3A%22flip+~%22%29%29", //TODO errata and unban dexterity cards
+            None => "%28f%3AVintage+or+%28banned%3AVintage+-o%3A%2F%5CWante%5CW%2F+-o%3A%22flip+~%22%29+or+st%3Acustom%29" //TODO errata and unban dexterity cards
+        },
+        gen.gen_range(0, 0x1_0000_0000_u64),
+        gen.gen_range(0, 0x1_0000_0000_u64)
+    ));
+    msg.reply(&builder.build())?;
     Ok(())
 }
 
