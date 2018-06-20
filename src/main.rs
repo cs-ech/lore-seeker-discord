@@ -348,11 +348,17 @@ fn eat_word(subj: &mut &str) -> Option<String> {
 
 fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
     let current_user_id = serenity::CACHE.read().user.id;
+    let is_inline_channel = {
+        let ctx_data = ctx.data.lock();
+        ctx_data.get::<InlineChannels>().ok_or(Error::MissingInlineChannels)?.contains(&msg.channel_id)
+    };
     let query = &mut if msg.content.starts_with(&current_user_id.mention()) { //TODO allow <@!id> mentions
         let mut query = &msg.content[current_user_id.mention().len()..];
         if query.starts_with(':') { query = &query[1..]; }
         if query.starts_with(' ') { query = &query[1..]; }
         query
+    } else if is_inline_channel && msg.content.starts_with('%') {
+        &msg.content[..]
     } else if msg.author.create_dm_channel().ok().map_or(false, |dm| dm.id == msg.channel_id) {
         &msg.content[..]
     } else {
@@ -429,7 +435,7 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
         handle_query(&ctx, msg, query, false)?;
     } else if let (Some(start_idx), Some(end_idx)) = (msg.content.find("[["), msg.content.find("]]")) {
         let ctx_data = ctx.data.lock();
-        if start_idx < end_idx && ctx_data.get::<InlineChannels>().ok_or(Error::MissingInlineChannels)?.contains(&msg.channel_id) {
+        if start_idx < end_idx && is_inline_channel {
             let db = ctx_data.get::<CardDb>().ok_or(Error::MissingCardDb)?;
             let mut query = &msg.content[start_idx + 2..end_idx];
             let set_code = if let Some(colon_idx) = query.find(":") {
