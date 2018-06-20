@@ -7,6 +7,8 @@ extern crate kuchiki;
 extern crate mtg;
 extern crate rand;
 extern crate reqwest;
+#[macro_use] extern crate serde_derive;
+extern crate serde_json;
 extern crate serenity;
 extern crate typemap;
 extern crate urlencoding;
@@ -14,6 +16,7 @@ extern crate urlencoding;
 use std::{
     collections::HashSet,
     env,
+    fs::File,
     io::{
         self,
         prelude::*
@@ -190,6 +193,15 @@ pub fn shut_down(ctx: &Context) {
     shard_manager.shutdown_all();
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
+struct Config {
+    #[serde(default)]
+    inline_channels: HashSet<ChannelId>,
+    token: String
+}
+
 struct Handler;
 
 impl EventHandler for Handler {
@@ -235,6 +247,7 @@ enum Error {
     Db(mtg::card::DbError),
     Env(env::VarError),
     Io(io::Error),
+    Json(serde_json::Error),
     MissingCardDb,
     MissingCardList,
     MissingInlineChannels,
@@ -283,6 +296,12 @@ impl From<mtg::card::DbError> for Error {
 impl From<reqwest::Error> for Error {
     fn from(e: reqwest::Error) -> Error {
         Error::Reqwest(e)
+    }
+}
+
+impl From<serde_json::Error> for Error {
+    fn from(e: serde_json::Error) -> Error {
+        Error::Json(e)
     }
 }
 
@@ -588,8 +607,8 @@ fn show_single_card(ctx: &Context, msg: &Message, reply_text: &str, card_name: &
 
 fn main() -> Result<(), Error> {
     // read config
-    let token = env::var("DISCORD_TOKEN")?;
-    let mut client = Client::new(&token, Handler)?;
+    let config = serde_json::from_reader::<_, Config>(File::open("/usr/local/share/fenhl/lore-seeker-discord.json")?)?;
+    let mut client = Client::new(&config.token, Handler)?;
     let owners = {
         let mut owners = HashSet::default();
         owners.insert(serenity::http::get_current_application_info()?.owner.id);
@@ -598,7 +617,7 @@ fn main() -> Result<(), Error> {
     {
         let mut data = client.data.lock();
         data.insert::<Owners>(owners);
-        data.insert::<InlineChannels>(HashSet::new()); //TODO read config
+        data.insert::<InlineChannels>(config.inline_channels);
         data.insert::<ShardManagerContainer>(Arc::clone(&client.shard_manager));
         // load cards before going online
         print!("[....] loading cards");
