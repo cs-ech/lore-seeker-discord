@@ -513,8 +513,8 @@ fn mental_judge_tower(msg: &Message, mut players: Vec<UserId>, custom: Option<bo
         "seed: <https://loreseeker.fenhl.net/card?q={}+is%3Aprimary+not%3Areprint+sort%3Arand+%28%28-layout%3Asplit+-layout%3Aaftermath%29+or+number%3A%2Fa%2F%29&random_seed={:08x}{:08x}>",
         match custom {
             Some(true) => "st%3Acustom",
-            Some(false) => "%28f%3AVintage+or+%28banned%3AVintage+-o%3A%2F%5CWante%5CW%2F+-o%3A%22flip+~%22%29%29", //TODO errata and unban dexterity cards
-            None => "%28f%3AVintage+or+%28banned%3AVintage+-o%3A%2F%5CWante%5CW%2F+-o%3A%22flip+~%22%29+or+st%3Acustom%29" //TODO errata and unban dexterity cards
+            Some(false) => "%28f%3AVintage+or+%28banned%3AVintage+-o%3A%2F%5CWante%5CW%2F%29%29",
+            None => "%28f%3AVintage+or+%28banned%3AVintage+-o%3A%2F%5CWante%5CW%2F%29+or+st%3Acustom%29"
         },
         gen.gen_range(0, 0x1_0000_0000_u64),
         gen.gen_range(0, 0x1_0000_0000_u64)
