@@ -358,9 +358,7 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
         if query.starts_with(':') { query = &query[1..]; }
         if query.starts_with(' ') { query = &query[1..]; }
         query
-    } else if is_inline_channel && msg.content.starts_with('%') {
-        &msg.content[..]
-    } else if msg.author.create_dm_channel().ok().map_or(false, |dm| dm.id == msg.channel_id) {
+    } else if is_inline_channel && msg.content.starts_with('%') || msg.is_private() {
         &msg.content[..]
     } else {
         ""
