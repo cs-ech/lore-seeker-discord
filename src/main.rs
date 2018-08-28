@@ -36,7 +36,10 @@ use chrono::prelude::*;
 
 use kuchiki::traits::TendrilSink;
 
-use mtg::card::Db;
+use mtg::card::{
+    Card,
+    Db
+};
 
 use rand::{
     Rng,
@@ -44,6 +47,7 @@ use rand::{
 };
 
 use serenity::{
+    builder::CreateEmbed,
     client::bridge::gateway::ShardManager,
     model::{
         channel::{
@@ -223,6 +227,7 @@ impl EventHandler for Handler {
         if msg.author.bot { return; } // ignore bots to prevent message loops
         if let Some(err_reply) = match handle_message(ctx, &msg) {
             Ok(()) => None,
+            Err(Error::DmOnlyCommand) => Some("to avoid spamming channels, this command is only allowed in direct messages".into()),
             Err(Error::MomirMissingCmc) => Some("missing CMC".into()),
             Err(Error::NoSuchCard(card_name)) => Some(MessageBuilder::default().push("error: no such card: ").push_safe(card_name).build()),
             Err(Error::OwnerCheck) => Some("this command can only be used by the bot owner".into()),
@@ -246,6 +251,7 @@ impl EventHandler for Handler {
 enum Error {
     CssSelector,
     Db(mtg::card::DbError),
+    DmOnlyCommand,
     Env(env::VarError),
     Io(io::Error),
     Json(serde_json::Error),
@@ -312,6 +318,57 @@ impl From<serenity::Error> for Error {
     }
 }
 
+#[must_use]
+fn card_embed(e: CreateEmbed, card: Card, card_url: String) -> CreateEmbed {
+    e
+        .color(match card.rarity().color() {
+            (0, 0, 0) => (1, 1, 1), // Discord turns actual black into light gray
+            c => c
+        })
+        .title(if let Some(cost) = card.mana_cost() {
+            format!("{} {}", card, with_manamoji(cost))
+        } else {
+            card.to_string()
+        })
+        .url(&card_url)
+        .description(MessageBuilder::default()
+            .push_bold_safe(&card.type_line()) //TODO color indicator
+            .push("\n\n")
+            .push(with_manamoji(&card.text())) //TODO add support for levelers, fix loyalty costs and quotes, italicize ability words and reminder text
+        )
+        .fields(
+            (if let Some((pow, tou)) = card.pt() {
+                Some(("P/T", MessageBuilder::default().push_safe(pow).push("/").push_safe(tou).build(), true))
+            } else {
+                None
+            }).into_iter()
+            .chain(if let Some(loy) = card.loyalty() {
+                Some(("Loyalty", loy.to_string(), true))
+            } else {
+                None
+            })
+            .chain(if let Some((hand, life)) = card.vanguard_modifiers() {
+                vec![
+                    (("Hand modifier", format!("{:+}", hand), true)),
+                    (("Life modifier", format!("{:+}", life), true))
+                ]
+            } else {
+                Vec::default()
+            })
+        )
+        .footer(|f| f.text(
+            if card.num_printings() >= 100 {
+                format!("{} printings", card.num_printings())
+            } else {
+                card.printings()
+                    .into_iter()
+                    .map(|printing| format!("{}-{}", printing.set, printing.rarity.short()))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }
+        ))
+}
+
 fn eat_user_mention(subj: &mut &str) -> Option<UserId> {
     if !subj.starts_with('<') || !subj.contains('>') {
         return None;
@@ -371,6 +428,37 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                 "quit" => {
                     owner_check(&ctx, &msg)?;
                     shut_down(&ctx);
+                    return Ok(());
+                }
+                "check" => {
+                    owner_check(&ctx, &msg)?;
+                    if !msg.is_private() {
+                        return Err(Error::DmOnlyCommand);
+                    }
+                    msg.reply("reloading database…")?;
+                    let mut data = ctx.data.lock();
+                    reload_db(&mut data)?;
+                    msg.reply("done, resolving query…")?;
+                    let (encoded_query, matches) = resolve_query(query)?;
+                    let matches = matches.collect::<Vec<_>>();
+                    msg.reply(&format!("{} cards found: <https://loreseeker.fenhl.net/card?q={}>. Checking cards…", matches.len(), encoded_query))?;
+                    let db = data.get::<CardDb>().ok_or(Error::MissingCardDb)?;
+                    let mut oks = 0;
+                    let mut errs = 0;
+                    for card_name in matches {
+                        let card = match db.card(&card_name) {
+                            Some(card) => card,
+                            None => {
+                                msg.reply(&format!("Card not found: {}", card_name))?;
+                                errs += 1;
+                                continue;
+                            }
+                        };
+                        let _ = card_embed(CreateEmbed::default(), card, String::default());
+                        //TODO check whether attempting to render this card throws an error
+                        oks += 1;
+                    }
+                    msg.reply(&format!("{} card embeds successfully rendered, {} errors", oks, errs))?;
                     return Ok(());
                 }
                 "rand" | "random" => {
@@ -456,21 +544,7 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
 }
 
 fn handle_query(ctx: &Context, msg: &Message, query: &str, random: bool) -> Result<(), Error> {
-    let encoded_query = urlencoding::encode(query);
-    let document = {
-        let mut response = reqwest::get(&format!("http://localhost:18803/list?q={}", encoded_query))?;
-        if !response.status().is_success() {
-            return Err(Error::ResponseStatus(response.status()));
-        }
-        let mut response_content = String::default();
-        response.read_to_string(&mut response_content)?;
-        kuchiki::parse_html().one(response_content)
-    };
-    let matches = document.select("ul#search-result").map_err(|()| Error::CssSelector)?
-        .next().ok_or(Error::MissingCardList)?
-        .as_node()
-        .children()
-        .filter_map(|node| node.first_child().and_then(|text_node| text_node.as_text().map(|text| text.borrow().trim().to_owned())));
+    let (encoded_query, matches) = resolve_query(query)?;
     handle_query_result(ctx, msg, matches, random, encoded_query)
 }
 
@@ -555,6 +629,25 @@ fn reload_db(ctx_data: &mut ShareMap) -> Result<(), Error> {
     Ok(())
 }
 
+fn resolve_query(query: &str) -> Result<(impl fmt::Display, impl Iterator<Item = String>), Error> {
+    let encoded_query = urlencoding::encode(query);
+    let document = {
+        let mut response = reqwest::get(&format!("http://localhost:18803/list?q={}", encoded_query))?;
+        if !response.status().is_success() {
+            return Err(Error::ResponseStatus(response.status()));
+        }
+        let mut response_content = String::default();
+        response.read_to_string(&mut response_content)?;
+        kuchiki::parse_html().one(response_content)
+    };
+    let matches = document.select("ul#search-result").map_err(|()| Error::CssSelector)?
+        .next().ok_or(Error::MissingCardList)?
+        .as_node()
+        .children()
+        .filter_map(|node| node.first_child().and_then(|text_node| text_node.as_text().map(|text| text.borrow().trim().to_owned())));
+    Ok((encoded_query, matches))
+}
+
 fn show_single_card(ctx: &Context, msg: &Message, reply_text: &str, card_name: &str) -> Result<(), Error> {
     let card_url = format!("https://loreseeker.fenhl.net/card?q=!{}", urlencoding::encode(card_name)); //TODO use exact printing URL
     let mut reply = msg.reply(&format!("{}: <{}>", reply_text, card_url))?;
@@ -564,54 +657,7 @@ fn show_single_card(ctx: &Context, msg: &Message, reply_text: &str, card_name: &
         db.card(card_name).ok_or(Error::NoSuchCard(card_name.to_owned()))?
     };
     reply.edit(|m| m
-        .embed(|e| e
-            .color(match card.rarity().color() {
-                (0, 0, 0) => (1, 1, 1), // Discord turns actual black into light gray
-                c => c
-            })
-            .title(if let Some(cost) = card.mana_cost() {
-                format!("{} {}", card, with_manamoji(cost))
-            } else {
-                card.to_string()
-            })
-            .url(&card_url)
-            .description(MessageBuilder::default()
-                .push_bold_safe(&card.type_line()) //TODO color indicator
-                .push("\n\n")
-                .push(with_manamoji(&card.text())) //TODO add support for levelers, fix loyalty costs and quotes, italicize ability words and reminder text
-            )
-            .fields(
-                (if let Some((pow, tou)) = card.pt() {
-                    Some(("P/T", MessageBuilder::default().push_safe(pow).push("/").push_safe(tou).build(), true))
-                } else {
-                    None
-                }).into_iter()
-                .chain(if let Some(loy) = card.loyalty() {
-                    Some(("Loyalty", loy.to_string(), true))
-                } else {
-                    None
-                })
-                .chain(if let Some((hand, life)) = card.vanguard_modifiers() {
-                    vec![
-                        (("Hand modifier", format!("{:+}", hand), true)),
-                        (("Life modifier", format!("{:+}", life), true))
-                    ]
-                } else {
-                    Vec::default()
-                })
-            )
-            .footer(|f| f.text(
-                if card.num_printings() >= 100 {
-                    format!("{} printings", card.num_printings())
-                } else {
-                    card.printings()
-                        .into_iter()
-                        .map(|printing| format!("{}-{}", printing.set, printing.rarity.short()))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                }
-            ))
-        )
+        .embed(|e| card_embed(e, card, card_url))
     )?;
     Ok(())
 }
