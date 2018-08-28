@@ -29,7 +29,8 @@ use std::{
         PoisonError,
         RwLockReadGuard
     },
-    thread
+    thread,
+    time::Duration
 };
 
 use chrono::prelude::*;
@@ -716,5 +717,6 @@ fn main() -> Result<(), Error> {
     }
     // connect to Discord
     client.start_autosharded()?;
+    thread::sleep(Duration::from_secs(1)); // wait to make sure websockets can be closed cleanly
     Ok(())
 }
