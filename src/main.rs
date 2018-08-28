@@ -457,9 +457,16 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                                 continue;
                             }
                         };
-                        let _ = card_embed(CreateEmbed::default(), card, String::default());
-                        //TODO check whether attempting to render this card throws an error
-                        oks += 1;
+                        let check_thread = thread::Builder::new().name("Lore Seeker card check".into()).spawn(move || {
+                            let _ = card_embed(CreateEmbed::default(), card, String::default());
+                        })?;
+                        match check_thread.join() {
+                            Ok(()) => { oks += 1; }
+                            Err(e) => {
+                                msg.reply(&format!("Error rendering card embed: {:?}", e))?;
+                                errs += 1;
+                            }
+                        }
                     }
                     msg.reply(&format!("{} card embeds successfully rendered, {} errors", oks, errs))?;
                     return Ok(());
@@ -691,7 +698,7 @@ fn main() -> Result<(), Error> {
     // listen for IPC commands
     {
         let client_data = client.data.clone();
-        thread::spawn(move || -> Result<(), _> { //TODO change to Result<!, _>
+        thread::Builder::new().name("Lore Seeker IPC".into()).spawn(move || -> Result<(), _> { //TODO change to Result<!, _>
             for stream in TcpListener::bind("127.0.0.1:18806")?.incoming() {
                 let mut stream = stream?;
                 let mut buf = String::default();
@@ -705,7 +712,7 @@ fn main() -> Result<(), Error> {
                 }
             }
             unreachable!();
-        });
+        })?;
     }
     // connect to Discord
     client.start_autosharded()?;
