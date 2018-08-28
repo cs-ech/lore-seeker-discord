@@ -463,8 +463,8 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                         })?;
                         match check_thread.join() {
                             Ok(()) => { oks += 1; }
-                            Err(e) => {
-                                msg.reply(&format!("Error rendering card embed: {:?}", e))?;
+                            Err(_) => {
+                                msg.reply(&format!("Error rendering card embed for {}", card_name))?;
                                 errs += 1;
                             }
                         }
