@@ -489,7 +489,7 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                         players.push(user_id);
                         eat_whitespace(query);
                     }
-                    return mental_judge_tower(&msg, players, Some(false));
+                    return mental_judge_tower(&msg, players, Some(false), query);
                 }
                 "cmjt" => {
                     // custom Mental Judge Tower, for custom cards
@@ -498,7 +498,7 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                         players.push(user_id);
                         eat_whitespace(query);
                     }
-                    return mental_judge_tower(&msg, players, Some(true));
+                    return mental_judge_tower(&msg, players, Some(true), query);
                 }
                 "fmjt" => {
                     // fusion Mental Judge Tower, for both real and custom cards
@@ -507,22 +507,25 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                         players.push(user_id);
                         eat_whitespace(query);
                     }
-                    return mental_judge_tower(&msg, players, None);
+                    return mental_judge_tower(&msg, players, None, query);
                 }
                 "momir" => {
                     // Momir, for real cards
                     let cmc = eat_word(query).ok_or(Error::MomirMissingCmc)?.parse::<usize>()?;
-                    return momir(&ctx, msg, cmc, Some(false));
+                    eat_whitespace(query);
+                    return momir(&ctx, msg, cmc, Some(false), query);
                 }
                 "cmomir" => {
                     // custom Momir, for custom cards
                     let cmc = eat_word(query).ok_or(Error::MomirMissingCmc)?.parse::<usize>()?;
-                    return momir(&ctx, msg, cmc, Some(true));
+                    eat_whitespace(query);
+                    return momir(&ctx, msg, cmc, Some(true), query);
                 }
                 "fmomir" => {
                     // fusion Momir, for both real and custom cards
                     let cmc = eat_word(query).ok_or(Error::MomirMissingCmc)?.parse::<usize>()?;
-                    return momir(&ctx, msg, cmc, None);
+                    eat_whitespace(query);
+                    return momir(&ctx, msg, cmc, None, query);
                 }
                 cmd => {
                     return Err(Error::UnknownCommand(cmd.into()));
@@ -580,7 +583,7 @@ fn handle_query_result(ctx: &Context, msg: &Message, matches: impl IntoIterator<
     Ok(())
 }
 
-fn mental_judge_tower(msg: &Message, mut players: Vec<UserId>, custom: Option<bool>) -> Result<(), Error> {
+fn mental_judge_tower(msg: &Message, mut players: Vec<UserId>, custom: Option<bool>, query: &str) -> Result<(), Error> {
     let mut builder = MessageBuilder::default();
     let mut gen = thread_rng();
     if !players.is_empty() {
@@ -593,12 +596,18 @@ fn mental_judge_tower(msg: &Message, mut players: Vec<UserId>, custom: Option<bo
         builder = builder.push("\n");
     }
     builder = builder.push(format!(
-        "seed: <https://loreseeker.fenhl.net/card?q={}+is%3Aprimary+not%3Areprint+sort%3Arand+%28%28-layout%3Asplit+-layout%3Aaftermath%29+or+number%3A%2Fa%2F%29&random_seed={:08x}{:08x}>",
+        "seed: <https://loreseeker.fenhl.net/card?q={}+is%3Aprimary+not%3Areprint+sort%3Arand+%28%28-layout%3Asplit+-layout%3Aaftermath%29+or+number%3A%2Fa%2F%29",
         match custom {
             Some(true) => "st%3Acustom",
             Some(false) => "%28f%3AVintage+or+%28banned%3AVintage+-o%3A%2F%5CWante%5CW%2F%29%29",
             None => "%28f%3AVintage+or+%28banned%3AVintage+-o%3A%2F%5CWante%5CW%2F%29+or+st%3Acustom%29"
-        },
+        }
+    ));
+    if !query.is_empty() {
+        builder = builder.push("+").push(urlencoding::encode(query));
+    }
+    builder = builder.push(format!(
+        "&random_seed={:08x}{:08x}>",
         gen.gen_range(0, 0x1_0000_0000_u64),
         gen.gen_range(0, 0x1_0000_0000_u64)
     ));
@@ -606,12 +615,18 @@ fn mental_judge_tower(msg: &Message, mut players: Vec<UserId>, custom: Option<bo
     Ok(())
 }
 
-fn momir(ctx: &Context, msg: &Message, cmc: usize, custom: Option<bool>) -> Result<(), Error> {
-    let query = format!("is:primary t:creature cmc={} {}", cmc, match custom {
-        Some(true) => "is:custom",
-        Some(false) => "f:Vintage",
-        None => "(is:custom or f:Vintage)"
-    });
+fn momir(ctx: &Context, msg: &Message, cmc: usize, custom: Option<bool>, query: &str) -> Result<(), Error> {
+    let query = format!(
+        "is:primary t:creature cmc={} {}{}{}",
+        cmc,
+        match custom {
+            Some(true) => "is:custom",
+            Some(false) => "f:Vintage",
+            None => "(is:custom or f:Vintage)"
+        },
+        if query.is_empty() { "" } else { " " },
+        query
+    );
     handle_query(ctx, msg, &query, true)
 }
 
