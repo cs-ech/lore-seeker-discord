@@ -37,9 +37,12 @@ use chrono::prelude::*;
 
 use kuchiki::traits::TendrilSink;
 
-use mtg::card::{
-    Card,
-    Db
+use mtg::{
+    card::{
+        Card,
+        Db
+    },
+    color::ColorSet
 };
 
 use rand::{
@@ -56,7 +59,10 @@ use serenity::{
             ReactionType
         },
         gateway::Ready,
-        guild::Guild,
+        guild::{
+            Emoji,
+            Guild
+        },
         id::{
             ChannelId,
             EmojiId,
@@ -168,6 +174,58 @@ manamoji! {
     "{hw}" => "manahw", 386741125773262848;
     "{½}" => "manahalf", 386741122510225421;
     "{∞}" => "manainfinity", 386741125861605387;
+}
+
+macro_rules! indicator_emoji {
+    ($($colors:pat => $name:expr, $id:expr;)+) => {
+        fn indicator_emoji(colors: &ColorSet) -> Option<Emoji> { //TODO add all emoji, remove Option wrapper
+            match *colors {
+                $($colors => Some(Emoji {
+                    animated: false,
+                    id: EmojiId($id),
+                    name: $name.to_owned(),
+                    managed: false,
+                    require_colons: true,
+                    roles: Vec::default()
+                }),)+
+                _ => None
+            }
+        }
+    };
+}
+indicator_emoji! {
+    //ColorSet { white: false, blue: false, black: false, red: false, green: false } => "in_c", unimplemented!(); //TODO colorless
+    ColorSet { white: true, blue: false, black: false, red: false, green: false } => "in_w", 493480100252352512;
+    ColorSet { white: false, blue: true, black: false, red: false, green: false } => "in_u", 493480399532589067;
+    ColorSet { white: false, blue: false, black: true, red: false, green: false } => "in_b", 493480399146844171;
+    ColorSet { white: false, blue: false, black: false, red: true, green: false } => "in_r", 493480399545040910;
+    ColorSet { white: false, blue: false, black: false, red: false, green: true } => "in_g", 493480399737978883;
+    ColorSet { white: true, blue: true, black: false, red: false, green: false } => "in_wu", 493518454775873536;
+    ColorSet { white: false, blue: true, black: true, red: false, green: false } => "in_ub", 493518454033219585;
+    ColorSet { white: false, blue: false, black: true, red: true, green: false } => "in_br", 493518453249015809;
+    ColorSet { white: false, blue: false, black: false, red: true, green: true } => "in_rg", 493518453886550016;
+    ColorSet { white: true, blue: false, black: false, red: false, green: true } => "in_gw", 493518453919973407;
+    ColorSet { white: true, blue: false, black: true, red: false, green: false } => "in_wb", 493518454108979202;
+    ColorSet { white: false, blue: true, black: false, red: true, green: false } => "in_ur", 493518454268100650;
+    ColorSet { white: false, blue: false, black: true, red: false, green: true } => "in_bg", 493518453123186689;
+    ColorSet { white: true, blue: false, black: false, red: true, green: false } => "in_rw", 493518453999927307;
+    ColorSet { white: false, blue: true, black: false, red: false, green: true } => "in_gu", 493518453249015810;
+    //ColorSet { white: true, blue: true, black: false, red: false, green: true } => "in_gwu", unimplemented!(); //TODO bant
+    //ColorSet { white: true, blue: true, black: true, red: false, green: false } => "in_wub", unimplemented!(); //TODO esper
+    //ColorSet { white: false, blue: true, black: true, red: true, green: false } => "in_ubr", unimplemented!(); //TODO grixis
+    //ColorSet { white: false, blue: false, black: true, red: true, green: true } => "in_brg", unimplemented!(); //TODO jund
+    //ColorSet { white: true, blue: false, black: false, red: true, green: true } => "in_rgw", unimplemented!(); //TODO naya
+    //ColorSet { white: true, blue: false, black: true, red: false, green: true } => "in_wbg", unimplemented!(); //TODO abzan
+    //ColorSet { white: true, blue: true, black: false, red: true, green: false } => "in_urw", unimplemented!(); //TODO jeskai
+    //ColorSet { white: false, blue: true, black: true, red: false, green: true } => "in_bgu", unimplemented!(); //TODO sultai
+    //ColorSet { white: true, blue: false, black: true, red: true, green: false } => "in_rwb", unimplemented!(); //TODO mardu
+    //ColorSet { white: false, blue: true, black: false, red: true, green: true } => "in_gur", unimplemented!(); //TODO temur
+    //ColorSet { white: true, blue: true, black: true, red: true, green: false } => "in_wubr", unimplemented!(); //TODO yore-tiller
+    //ColorSet { white: false, blue: true, black: true, red: true, green: true } => "in_ubrg", unimplemented!(); //TODO glint-eye
+    //ColorSet { white: true, blue: false, black: true, red: true, green: true } => "in_brgw", unimplemented!(); //TODO dune-brood
+    //ColorSet { white: true, blue: true, black: false, red: true, green: true } => "in_rgwu", unimplemented!(); //TODO ink-treader
+    //ColorSet { white: true, blue: true, black: true, red: false, green: true } => "in_gwub", unimplemented!(); //TODO witch-maw
+    //ColorSet { white: true, blue: true, black: true, red: true, green: true } => "in_wubrg", unimplemented!(); //TODO rainbow
 }
 
 struct CardDb;
@@ -335,11 +393,23 @@ fn card_embed(e: CreateEmbed, card: Card, card_url: String) -> CreateEmbed {
             card.to_string()
         })
         .url(&card_url)
-        .description(MessageBuilder::default()
-            .push_bold_safe(&card.type_line()) //TODO color indicator
-            .push("\n\n")
-            .push(with_manamoji(&card.text())) //TODO add support for levelers, fix loyalty costs and quotes, italicize ability words and reminder text
-        )
+        .description({
+            let mut description_builder = MessageBuilder::default();
+            if let Some(indicator) = card.color_indicator() {
+                if let Some(emoji) = indicator_emoji(&indicator) {
+                    description_builder = description_builder.emoji(&emoji);
+                } else {
+                    description_builder = description_builder
+                        .push("[")
+                        .push(indicator.canonical_order().into_iter().map(|c| c.letter()).collect::<String>())
+                        .push("]");
+                }
+            }
+            description_builder
+                .push_bold_safe(&card.type_line())
+                .push("\n\n")
+                .push(with_manamoji(&card.text())) //TODO add support for levelers, fix loyalty costs and quotes, italicize ability words and reminder text
+        })
         .fields(
             (if let Some((pow, tou)) = card.pt() {
                 Some(("P/T", MessageBuilder::default().push_safe(pow).push("/").push_safe(tou).build(), true))
