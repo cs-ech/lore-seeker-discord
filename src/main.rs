@@ -178,23 +178,22 @@ manamoji! {
 
 macro_rules! indicator_emoji {
     ($($colors:pat => $name:expr, $id:expr;)+) => {
-        fn indicator_emoji(colors: &ColorSet) -> Option<Emoji> { //TODO add all emoji, remove Option wrapper
+        fn indicator_emoji(colors: &ColorSet) -> Emoji {
             match *colors {
-                $($colors => Some(Emoji {
+                $($colors => Emoji {
                     animated: false,
                     id: EmojiId($id),
                     name: $name.to_owned(),
                     managed: false,
                     require_colons: true,
                     roles: Vec::default()
-                }),)+
-                _ => None
+                },)+
             }
         }
     };
 }
 indicator_emoji! {
-    //ColorSet { white: false, blue: false, black: false, red: false, green: false } => "in_c", unimplemented!(); //TODO colorless
+    ColorSet { white: false, blue: false, black: false, red: false, green: false } => "in_c", 493537120628244481;
     ColorSet { white: true, blue: false, black: false, red: false, green: false } => "in_w", 493480100252352512;
     ColorSet { white: false, blue: true, black: false, red: false, green: false } => "in_u", 493480399532589067;
     ColorSet { white: false, blue: false, black: true, red: false, green: false } => "in_b", 493480399146844171;
@@ -220,12 +219,12 @@ indicator_emoji! {
     ColorSet { white: false, blue: true, black: true, red: false, green: true } => "in_bgu", 493531780666884097;
     ColorSet { white: true, blue: false, black: true, red: true, green: false } => "in_rwb", 493531782352732160;
     ColorSet { white: false, blue: true, black: false, red: true, green: true } => "in_gur", 493531781782306863;
-    //ColorSet { white: true, blue: true, black: true, red: true, green: false } => "in_wubr", unimplemented!(); //TODO yore-tiller
-    //ColorSet { white: false, blue: true, black: true, red: true, green: true } => "in_ubrg", unimplemented!(); //TODO glint-eye
-    //ColorSet { white: true, blue: false, black: true, red: true, green: true } => "in_brgw", unimplemented!(); //TODO dune-brood
-    //ColorSet { white: true, blue: true, black: false, red: true, green: true } => "in_rgwu", unimplemented!(); //TODO ink-treader
-    //ColorSet { white: true, blue: true, black: true, red: false, green: true } => "in_gwub", unimplemented!(); //TODO witch-maw
-    //ColorSet { white: true, blue: true, black: true, red: true, green: true } => "in_wubrg", unimplemented!(); //TODO rainbow
+    ColorSet { white: true, blue: true, black: true, red: true, green: false } => "in_wubr", 493536592296673290;
+    ColorSet { white: false, blue: true, black: true, red: true, green: true } => "in_ubrg", 493536591973974046;
+    ColorSet { white: true, blue: false, black: true, red: true, green: true } => "in_brgw", 493536591403286563;
+    ColorSet { white: true, blue: true, black: false, red: true, green: true } => "in_rgwu", 493536591482978315;
+    ColorSet { white: true, blue: true, black: true, red: false, green: true } => "in_gwub", 493536591474589699;
+    ColorSet { white: true, blue: true, black: true, red: true, green: true } => "in_wubrg", 493540446623236096;
 }
 
 struct CardDb;
@@ -396,14 +395,7 @@ fn card_embed(e: CreateEmbed, card: Card, card_url: String) -> CreateEmbed {
         .description({
             let mut description_builder = MessageBuilder::default();
             if let Some(indicator) = card.color_indicator() {
-                if let Some(emoji) = indicator_emoji(&indicator) {
-                    description_builder = description_builder.emoji(&emoji);
-                } else {
-                    description_builder = description_builder
-                        .push("[")
-                        .push(indicator.canonical_order().into_iter().map(|c| c.letter()).collect::<String>())
-                        .push("]");
-                }
+                description_builder = description_builder.emoji(&indicator_emoji(&indicator));
             }
             description_builder
                 .push_bold_safe(&card.type_line())
