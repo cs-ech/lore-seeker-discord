@@ -408,19 +408,14 @@ fn card_embed(e: CreateEmbed, card: Card, card_url: String) -> CreateEmbed {
             } else {
                 None
             }).into_iter()
-            .chain(if let Some(loy) = card.loyalty() {
-                Some(("Loyalty", loy.to_string(), true))
-            } else {
-                None
-            })
-            .chain(if let Some((hand, life)) = card.vanguard_modifiers() {
+            .chain(card.loyalty().map(|loy| ("Loyalty", loy.to_string(), true)))
+            .chain(card.stability().map(|sta| ("Stability", sta.to_string(), true)))
+            .chain(card.vanguard_modifiers().map(|(hand, life)| {
                 vec![
                     (("Hand modifier", format!("{:+}", hand), true)),
                     (("Life modifier", format!("{:+}", life), true))
                 ]
-            } else {
-                Vec::default()
-            })
+            }).unwrap_or_default())
         )
         .footer(|f| f.text(
             if card.num_printings() >= 100 {
