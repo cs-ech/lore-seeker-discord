@@ -713,7 +713,7 @@ fn reload_db(ctx_data: &mut ShareMap) -> Result<(), Error> {
 }
 
 fn resolve_query(query: &str) -> Result<(impl fmt::Display, impl Iterator<Item = String>), Error> {
-    let encoded_query = urlencoding::encode(query);
+    let encoded_query = urlencoding::encode(if query.is_empty() { "*" } else { query });
     let document = {
         let mut response = reqwest::get(&format!("http://localhost:18803/list?q={}", encoded_query))?;
         if !response.status().is_success() {
