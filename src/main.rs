@@ -326,7 +326,6 @@ enum Error {
     ParseInt(std::num::ParseIntError),
     Poison,
     Reqwest(reqwest::Error),
-    ResponseStatus(reqwest::StatusCode),
     Serenity(serenity::Error),
     UnknownCommand(String)
 }
@@ -715,10 +714,7 @@ fn reload_db(ctx_data: &mut ShareMap) -> Result<(), Error> {
 fn resolve_query(query: &str) -> Result<(impl fmt::Display, impl Iterator<Item = String>), Error> {
     let encoded_query = urlencoding::encode(if query.is_empty() { "*" } else { query });
     let document = {
-        let mut response = reqwest::get(&format!("http://localhost:18803/list?q={}", encoded_query))?;
-        if !response.status().is_success() {
-            return Err(Error::ResponseStatus(response.status()));
-        }
+        let mut response = reqwest::get(&format!("http://localhost:18803/list?q={}", encoded_query))?.error_for_status()?;
         let mut response_content = String::default();
         response.read_to_string(&mut response_content)?;
         kuchiki::parse_html().one(response_content)
