@@ -8,13 +8,18 @@ extern crate mtg;
 extern crate rand;
 extern crate reqwest;
 #[macro_use] extern crate serde_derive;
-extern crate serde_json;
+#[macro_use] extern crate serde_json;
 extern crate serenity;
 extern crate typemap;
 extern crate urlencoding;
 
+mod user_list;
+
 use std::{
-    collections::HashSet,
+    collections::{
+        HashMap,
+        HashSet
+    },
     env,
     fmt,
     fs::File,
@@ -32,11 +37,8 @@ use std::{
     thread,
     time::Duration
 };
-
 use chrono::prelude::*;
-
 use kuchiki::traits::TendrilSink;
-
 use mtg::{
     card::{
         Card,
@@ -44,12 +46,10 @@ use mtg::{
     },
     color::ColorSet
 };
-
 use rand::{
     Rng,
     thread_rng
 };
-
 use serenity::{
     builder::CreateEmbed,
     client::bridge::gateway::ShardManager,
@@ -61,19 +61,21 @@ use serenity::{
         gateway::Ready,
         guild::{
             Emoji,
-            Guild
+            Guild,
+            Member
         },
         id::{
             ChannelId,
             EmojiId,
+            GuildId,
             UserId
         },
-        permissions::Permissions
+        permissions::Permissions,
+        user::User
     },
     prelude::*,
     utils::MessageBuilder
 };
-
 use typemap::{
     Key,
     ShareMap
@@ -280,8 +282,35 @@ impl EventHandler for Handler {
         }
     }
 
+    fn guild_ban_addition(&self, _: Context, guild_id: GuildId, user: User) {
+        user_list::remove(guild_id, user).expect("failed to remove banned user from user list");
+    }
+
+    fn guild_ban_removal(&self, _: Context, guild_id: GuildId, user: User) {
+        user_list::add(guild_id, guild_id.member(user).expect("failed to get unbanned guild member")).expect("failed to add unbanned user to user list");
+    }
+
     fn guild_create(&self, _: Context, guild: Guild, _: bool) {
+        user_list::set_guild(guild.id, guild.members.values().cloned()).expect("failed to initialize user list");
         println!("[ ** ] Connected to {}", guild.name);
+    }
+
+    fn guild_member_addition(&self, _: Context, guild_id: GuildId, member: Member) {
+        user_list::add(guild_id, member).expect("failed to add new guild member to user list");
+    }
+
+    fn guild_member_removal(&self, _: Context, guild_id: GuildId, user: User, _: Option<Member>) {
+        user_list::remove(guild_id, user).expect("failed to remove removed guild member from user list");
+    }
+
+    fn guild_member_update(&self, _: Context, _: Option<Member>, member: Member) {
+        user_list::update(member.guild_id, member).expect("failed to update guild member info in user list");
+    }
+
+    fn guild_members_chunk(&self, _: Context, guild_id: GuildId, members: HashMap<UserId, Member>) {
+        for member in members.values() {
+            user_list::add(guild_id, member.clone()).expect("failed to add chunk of guild members to user list");
+        }
     }
 
     fn message(&self, ctx: Context, msg: Message) {
@@ -309,7 +338,7 @@ impl EventHandler for Handler {
 }
 
 #[derive(Debug)]
-enum Error {
+pub enum Error {
     CssSelector,
     Db(mtg::card::DbError),
     DmOnlyCommand,
