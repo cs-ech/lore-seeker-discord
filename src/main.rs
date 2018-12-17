@@ -2,17 +2,6 @@
 #![deny(unused)]
 #![forbid(unused_import_braces)]
 
-extern crate chrono;
-extern crate kuchiki;
-extern crate mtg;
-extern crate rand;
-extern crate reqwest;
-#[macro_use] extern crate serde_derive;
-#[macro_use] extern crate serde_json;
-extern crate serenity;
-extern crate typemap;
-extern crate urlencoding;
-
 mod user_list;
 
 use std::{
@@ -46,10 +35,8 @@ use mtg::{
     },
     color::ColorSet
 };
-use rand::{
-    Rng,
-    thread_rng
-};
+use rand::prelude::*;
+use serde_derive::Deserialize;
 use serenity::{
     builder::CreateEmbed,
     client::bridge::gateway::ShardManager,
@@ -651,7 +638,7 @@ fn handle_query_result(ctx: &Context, msg: &Message, matches: impl IntoIterator<
     let mut matches = matches.into_iter();
     if random {
         let matches_vec = matches.collect::<Vec<_>>();
-        if let Some(card_name) = thread_rng().choose(&matches_vec) {
+        if let Some(card_name) = matches_vec.choose(&mut thread_rng()) {
             show_single_card(ctx, msg, &format!("{} card{} found, random card", matches_vec.len(), if matches_vec.len() == 1 { "" } else { "s" }), card_name)?;
         } else {
             msg.reply("no cards found")?;
@@ -672,7 +659,7 @@ fn mental_judge_tower(msg: &Message, mut players: Vec<UserId>, custom: Option<bo
     let mut builder = MessageBuilder::default();
     let mut gen = thread_rng();
     if !players.is_empty() {
-        gen.shuffle(&mut players);
+        players.shuffle(&mut gen);
         for (i, player) in players.into_iter().enumerate() {
             builder = builder
                 .push(if i == 0 { "turn order: " } else { ", " })

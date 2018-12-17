@@ -11,6 +11,7 @@ use std::{
     },
     path::Path
 };
+use serde_json::json;
 use serenity::model::{
     guild::Member,
     id::{
@@ -18,7 +19,7 @@ use serenity::model::{
         UserId
     }
 };
-use super::Error;
+use crate::Error;
 
 const PROFILES_DIR: &'static str = "/var/www/loreseeker.fenhl.net/profiles";
 
