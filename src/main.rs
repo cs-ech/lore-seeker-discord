@@ -264,7 +264,7 @@ pub fn shut_down(ctx: &Context) {
 struct Config {
     #[serde(default)]
     inline_channels: HashSet<ChannelId>,
-    token: String
+    bot_token: String
 }
 
 #[derive(Default)]
@@ -837,7 +837,7 @@ fn main() -> Result<(), Error> {
         let config = serde_json::from_reader::<_, Config>(File::open("/usr/local/share/fenhl/lore-seeker-discord.json")?)?;
         let handler = Handler::default();
         let ctx_arc = handler.0.clone();
-        let mut client = Client::new(&config.token, handler)?;
+        let mut client = Client::new(&config.bot_token, handler)?;
         let owners = {
             let mut owners = HashSet::default();
             owners.insert(serenity::http::get_current_application_info()?.owner.id);
