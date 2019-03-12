@@ -14,9 +14,17 @@ use std::{
     fs::File,
     io::{
         self,
+        BufReader,
         prelude::*
     },
-    net::TcpListener,
+    net::{
+        TcpListener,
+        TcpStream
+    },
+    process::{
+        Command,
+        Stdio
+    },
     str::FromStr,
     sync::{
         Arc,
@@ -216,6 +224,8 @@ indicator_emoji! {
     ColorSet { white: true, blue: true, black: true, red: true, green: true } => "in_wubrg", 493540446623236096;
 }
 
+const IPC_ADDR: &str = "127.0.0.1:18806";
+
 struct CardDb;
 
 impl Key for CardDb {
@@ -257,10 +267,12 @@ struct Config {
     token: String
 }
 
-struct Handler;
+#[derive(Default)]
+struct Handler(Arc<Mutex<Option<Context>>>);
 
 impl EventHandler for Handler {
     fn ready(&self, ctx: Context, ready: Ready) {
+        *self.0.lock() = Some(ctx.clone());
         let guilds = ready.user.guilds().expect("failed to get guilds");
         if guilds.is_empty() {
             println!("[!!!!] No guilds found, use following URL to invite the bot:");
@@ -334,7 +346,9 @@ pub enum Error {
     Json(serde_json::Error),
     MissingCardDb,
     MissingCardList,
+    MissingContext,
     MissingInlineChannels,
+    MissingNewline,
     MissingOwners,
     MomirMissingCmc,
     NoSuchCard(String),
@@ -343,6 +357,7 @@ pub enum Error {
     Poison,
     Reqwest(reqwest::Error),
     Serenity(serenity::Error),
+    Shlex,
     UnknownCommand(String)
 }
 
@@ -655,6 +670,33 @@ fn handle_query_result(ctx: &Context, msg: &Message, matches: impl IntoIterator<
     Ok(())
 }
 
+fn listen_ipc(ctx_arc: Arc<Mutex<Option<Context>>>) -> Result<(), Error> { //TODO change return type to Result<!, Error>
+    for stream in TcpListener::bind(IPC_ADDR)?.incoming() {
+        let stream = stream?;
+        for line in BufReader::new(&stream).lines() {
+            let args = shlex::split(&line?).ok_or(Error::Shlex)?;
+            match &args[0][..] {
+                "quit" => {
+                    let ctx_guard = ctx_arc.lock();
+                    let ctx = ctx_guard.as_ref().ok_or(Error::MissingContext)?;
+                    shut_down(&ctx);
+                    thread::sleep(Duration::from_secs(1)); // wait to make sure websockets can be closed cleanly
+                    writeln!(&mut &stream, "shutdown complete")?;
+                }
+                "reload" => {
+                    let ctx_guard = ctx_arc.lock();
+                    let ctx = ctx_guard.as_ref().ok_or(Error::MissingContext)?;
+                    let mut data = ctx.data.lock();
+                    reload_db(&mut data)?;
+                    writeln!(&mut &stream, "reload complete")?;
+                }
+                s => { return Err(Error::UnknownCommand(s.to_owned())); }
+            }
+        }
+    }
+    unreachable!();
+}
+
 fn mental_judge_tower(msg: &Message, mut players: Vec<UserId>, custom: Option<bool>, query: &str) -> Result<(), Error> {
     let mut builder = MessageBuilder::default();
     let mut gen = thread_rng();
@@ -711,6 +753,25 @@ fn next_word(subj: &str) -> Option<String> {
     if word.is_empty() { None } else { Some(word) }
 }
 
+fn notify_ipc_crash(e: Error) {
+    let mut child = Command::new("ssmtp")
+        .arg("fenhl@wurstmineberg.de")
+        .stdin(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn ssmtp");
+    {
+        let stdin = child.stdin.as_mut().expect("failed to open ssmtp stdin");
+        write!(
+            stdin,
+            "To: fenhl@fenhl.net\nFrom: {}@{}\nSubject: Lore Seeker IPC thread crashed\n\nLore Seeker IPC thread crashed with the following error:\n{:?}\n",
+            whoami::username(),
+            whoami::hostname(),
+            e
+        ).expect("failed to write to ssmtp stdin");
+    }
+    child.wait().expect("failed to wait for ssmtp subprocess"); //TODO check exit status
+}
+
 fn owner_check(ctx: &Context, msg: &Message) -> Result<(), Error> {
     let data = ctx.data.lock();
     let owners = data.get::<Owners>().ok_or(Error::MissingOwners)?;
@@ -743,6 +804,15 @@ fn resolve_query(query: &str) -> Result<(impl fmt::Display, impl Iterator<Item =
     Ok((encoded_query, matches))
 }
 
+fn send_ipc_command<T: fmt::Display, I: IntoIterator<Item = T>>(cmd: I) -> Result<String, Error> {
+    let mut stream = TcpStream::connect(IPC_ADDR)?;
+    writeln!(&mut stream, "{}", cmd.into_iter().map(|arg| shlex::quote(&arg.to_string()).into_owned()).collect::<Vec<_>>().join(" "))?;
+    let mut buf = String::default();
+    BufReader::new(stream).read_line(&mut buf)?;
+    if buf.pop() != Some('\n') { return Err(Error::MissingNewline) }
+    Ok(buf)
+}
+
 fn show_single_card(ctx: &Context, msg: &Message, reply_text: &str, card_name: &str) -> Result<(), Error> {
     let card_url = format!("https://loreseeker.fenhl.net/card?q=!{}", urlencoding::encode(card_name)); //TODO use exact printing URL
     let mut reply = msg.reply(&format!("{}: <{}>", reply_text, card_url))?;
@@ -758,49 +828,47 @@ fn show_single_card(ctx: &Context, msg: &Message, reply_text: &str, card_name: &
 }
 
 fn main() -> Result<(), Error> {
-    // read config
-    let config = serde_json::from_reader::<_, Config>(File::open("/usr/local/share/fenhl/lore-seeker-discord.json")?)?;
-    let mut client = Client::new(&config.token, Handler)?;
-    let owners = {
-        let mut owners = HashSet::default();
-        owners.insert(serenity::http::get_current_application_info()?.owner.id);
-        owners
-    };
-    {
-        let mut data = client.data.lock();
-        data.insert::<Owners>(owners);
-        data.insert::<InlineChannels>(config.inline_channels);
-        data.insert::<ShardManagerContainer>(Arc::clone(&client.shard_manager));
-        // load cards before going online
-        print!("[....] loading cards");
-        io::stdout().flush()?;
-        let db = Db::from_sets_dir("/opt/git/github.com/fenhl/lore-seeker/stage/data/sets")?;
-        assert!(db.card("Dryad Arbor").ok_or(Error::NoSuchCard("Dryad Arbor".to_owned()))?.loyalty().is_none());
-        let num_cards = db.into_iter().count();
-        data.insert::<CardDb>(db);
-        println!("\r[ ok ] {} cards loaded", num_cards);
-    }
-    // listen for IPC commands
-    {
-        let client_data = client.data.clone();
-        thread::Builder::new().name("Lore Seeker IPC".into()).spawn(move || -> Result<(), _> { //TODO change to Result<!, _>
-            for stream in TcpListener::bind("127.0.0.1:18806")?.incoming() {
-                let mut stream = stream?;
-                let mut buf = String::default();
-                stream.read_to_string(&mut buf)?;
-                match buf.trim() {
-                    "reload" => {
-                        let mut data = client_data.lock();
-                        reload_db(&mut data)?;
-                    }
-                    s => { return Err(Error::UnknownCommand(s.to_owned())); }
+    let mut args = env::args().peekable();
+    let _ = args.next(); // ignore executable name
+    if args.peek().is_some() {
+        println!("{}", send_ipc_command(args)?);
+    } else {
+        // read config
+        let config = serde_json::from_reader::<_, Config>(File::open("/usr/local/share/fenhl/lore-seeker-discord.json")?)?;
+        let handler = Handler::default();
+        let ctx_arc = handler.0.clone();
+        let mut client = Client::new(&config.token, handler)?;
+        let owners = {
+            let mut owners = HashSet::default();
+            owners.insert(serenity::http::get_current_application_info()?.owner.id);
+            owners
+        };
+        {
+            let mut data = client.data.lock();
+            data.insert::<Owners>(owners);
+            data.insert::<InlineChannels>(config.inline_channels);
+            data.insert::<ShardManagerContainer>(Arc::clone(&client.shard_manager));
+            // load cards before going online
+            print!("[....] loading cards");
+            io::stdout().flush()?;
+            let db = Db::from_sets_dir("/opt/git/github.com/fenhl/lore-seeker/stage/data/sets")?;
+            assert!(db.card("Dryad Arbor").ok_or(Error::NoSuchCard("Dryad Arbor".to_owned()))?.loyalty().is_none());
+            let num_cards = db.into_iter().count();
+            data.insert::<CardDb>(db);
+            println!("\r[ ok ] {} cards loaded", num_cards);
+        }
+        // listen for IPC commands
+        {
+            thread::Builder::new().name("Lore Seeker IPC".into()).spawn(move || {
+                if let Err(e) = listen_ipc(ctx_arc) { //TODO remove `if` after changing from `()` to `!`
+                    eprintln!("{:?}", e);
+                    notify_ipc_crash(e);
                 }
-            }
-            unreachable!();
-        })?;
+            })?;
+        }
+        // connect to Discord
+        client.start_autosharded()?;
+        thread::sleep(Duration::from_secs(1)); // wait to make sure websockets can be closed cleanly
     }
-    // connect to Discord
-    client.start_autosharded()?;
-    thread::sleep(Duration::from_secs(1)); // wait to make sure websockets can be closed cleanly
     Ok(())
 }

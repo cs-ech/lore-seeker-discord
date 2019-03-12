@@ -20,8 +20,10 @@ serde = "1"
 serde_derive = "1"
 serde_json = "1"
 serenity = "*"
+shlex = "*"
 typemap = "*"
 urlencoding = "*"
+whoami = "*"
 
 [dependencies.mtg]
 git = "https://github.com/fenhl/rust-mtg"
