@@ -260,7 +260,6 @@ pub fn shut_down(ctx: &Context) {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 struct Config {
     #[serde(default)]
