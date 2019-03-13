@@ -730,7 +730,7 @@ dependencies = [
 [[package]]
 name = "mtg"
 version = "0.1.0"
-source = "git+https://github.com/fenhl/rust-mtg#0a8943c2504d1fb25d4a0d75be6e9424e04500cc"
+source = "git+https://github.com/fenhl/rust-mtg#02e77a449ba64606b9cbd56788ab37aa3ad69889"
 dependencies = [
  "num 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "regex 1.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
