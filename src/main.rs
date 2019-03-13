@@ -224,6 +224,7 @@ indicator_emoji! {
     ColorSet { white: true, blue: true, black: true, red: true, green: true } => "in_wubrg", 493540446623236096;
 }
 
+const HOSTNAME: &str = "lore-seeker.cards";
 const IPC_ADDR: &str = "127.0.0.1:18806";
 
 struct CardDb;
@@ -532,7 +533,7 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                     msg.reply("done, resolving query…")?;
                     let (encoded_query, matches) = resolve_query(query)?;
                     let matches = matches.collect::<Vec<_>>();
-                    msg.reply(&format!("{} cards found: <https://loreseeker.fenhl.net/card?q={}>. Checking cards…", matches.len(), encoded_query))?;
+                    msg.reply(&format!("{} cards found: <https://{}/card?q={}>. Checking cards…", HOSTNAME, matches.len(), encoded_query))?;
                     let db = data.get::<CardDb>().ok_or(Error::MissingCardDb)?;
                     let mut oks = 0;
                     let mut errs = 0;
@@ -660,7 +661,7 @@ fn handle_query_result(ctx: &Context, msg: &Message, matches: impl IntoIterator<
         }
     } else {
         match (matches.next(), matches.next()) {
-            (Some(_), Some(_)) => { msg.reply(&format!("{} cards found: <https://loreseeker.fenhl.net/card?q={}>", 2 + matches.count(), encoded_query))?; }
+            (Some(_), Some(_)) => { msg.reply(&format!("{} cards found: <https://{}/card?q={}>", HOSTNAME, 2 + matches.count(), encoded_query))?; }
             (Some(card_name), None) => {
                 show_single_card(ctx, msg, "1 card found", &card_name)?;
             }
@@ -710,7 +711,8 @@ fn mental_judge_tower(msg: &Message, mut players: Vec<UserId>, custom: Option<bo
         builder = builder.push("\n");
     }
     builder = builder.push(format!(
-        "seed: <https://loreseeker.fenhl.net/card?q={}+is%3Aprimary+not%3Areprint+sort%3Arand+%28%28-layout%3Asplit+-layout%3Aaftermath%29+or+number%3A%2Fa%2F%29",
+        "seed: <https://{}/card?q={}+is%3Aprimary+not%3Areprint+sort%3Arand+%28%28-layout%3Asplit+-layout%3Aaftermath%29+or+number%3A%2Fa%2F%29",
+        HOSTNAME,
         match custom {
             Some(true) => "st%3Acustom",
             Some(false) => "%28f%3AVintage+or+%28banned%3AVintage+-o%3A%2F%5CWante%5CW%2F%29%29",
@@ -814,7 +816,7 @@ fn send_ipc_command<T: fmt::Display, I: IntoIterator<Item = T>>(cmd: I) -> Resul
 }
 
 fn show_single_card(ctx: &Context, msg: &Message, reply_text: &str, card_name: &str) -> Result<(), Error> {
-    let card_url = format!("https://loreseeker.fenhl.net/card?q=!{}", urlencoding::encode(card_name)); //TODO use exact printing URL
+    let card_url = format!("https://{}/card?q=!{}", HOSTNAME, urlencoding::encode(card_name)); //TODO use exact printing URL
     let mut reply = msg.reply(&format!("{}: <{}>", reply_text, card_url))?;
     let card = {
         let data = ctx.data.lock();

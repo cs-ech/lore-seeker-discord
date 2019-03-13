@@ -21,7 +21,7 @@ use serenity::model::{
 };
 use crate::Error;
 
-const PROFILES_DIR: &'static str = "/var/www/loreseeker.fenhl.net/profiles";
+const PROFILES_DIR: &'static str = "/usr/local/share/fenhl/lore-seeker/profiles";
 
 /// Add a Discord account to the given guild's user list.
 pub fn add(guild_id: GuildId, member: Member) -> Result<(), Error> {
