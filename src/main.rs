@@ -836,7 +836,7 @@ fn main() -> Result<(), Error> {
         println!("{}", send_ipc_command(args)?);
     } else {
         // read config
-        let config = serde_json::from_reader::<_, Config>(File::open("/usr/local/share/fenhl/lore-seeker-discord.json")?)?;
+        let config = serde_json::from_reader::<_, Config>(File::open("/usr/local/share/fenhl/lore-seeker/config.json")?)?;
         let handler = Handler::default();
         let ctx_arc = handler.0.clone();
         let mut client = Client::new(&config.bot_token, handler)?;
