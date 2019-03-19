@@ -532,7 +532,7 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                     msg.reply("done, resolving query…")?;
                     let (encoded_query, matches) = resolve_query(query)?;
                     let matches = matches.collect::<Vec<_>>();
-                    msg.reply(&format!("{} cards found: <https://{}/card?q={}>. Checking cards…", HOSTNAME, matches.len(), encoded_query))?;
+                    msg.reply(&format!("{} cards found: <https://{}/card?q={}>. Checking cards…", matches.len(), HOSTNAME, encoded_query))?;
                     let db = data.get::<CardDb>().ok_or(Error::MissingCardDb)?;
                     let mut oks = 0;
                     let mut errs = 0;
@@ -660,7 +660,7 @@ fn handle_query_result(ctx: &Context, msg: &Message, matches: impl IntoIterator<
         }
     } else {
         match (matches.next(), matches.next()) {
-            (Some(_), Some(_)) => { msg.reply(&format!("{} cards found: <https://{}/card?q={}>", HOSTNAME, 2 + matches.count(), encoded_query))?; }
+            (Some(_), Some(_)) => { msg.reply(&format!("{} cards found: <https://{}/card?q={}>", 2 + matches.count(), HOSTNAME, encoded_query))?; }
             (Some(card_name), None) => {
                 show_single_card(ctx, msg, "1 card found", &card_name)?;
             }
