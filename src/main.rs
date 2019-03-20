@@ -75,6 +75,7 @@ use typemap::{
     Key,
     ShareMap
 };
+use url::Url;
 
 macro_rules! manamoji {
     ($($sym:expr => $name:expr, $id:expr;)+) => {
@@ -323,7 +324,7 @@ impl EventHandler for Handler {
             Err(Error::ParseInt(e)) => Some(MessageBuilder::default().push("invalid number: ").push_safe(e).build()),
             Err(Error::Reqwest(e)) => {
                 println!("{}: Message handler returned reqwest error {:?}", Utc::now().format("%Y-%m-%d %H:%M:%S"), e);
-                Some("failed to connect to Lore Seeker website, try again later".into()) //TODO check if lore-seeker screen is running
+                Some("failed to connect to Lore Seeker website, try again later".into()) //TODO check if lore-seeker service is running
             }
             Err(Error::UnknownCommand(cmd)) => Some(MessageBuilder::default().push("unknown command: %").push_safe(cmd).build()),
             Err(e) => {
@@ -410,7 +411,7 @@ impl From<serenity::Error> for Error {
 }
 
 #[must_use]
-fn card_embed(e: CreateEmbed, card: Card, card_url: String) -> CreateEmbed {
+fn card_embed(e: CreateEmbed, card: Card, card_url: &Url) -> CreateEmbed {
     e
         .color(match card.rarity().color() {
             (0, 0, 0) => (1, 1, 1), // Discord turns actual black into light gray
@@ -421,7 +422,7 @@ fn card_embed(e: CreateEmbed, card: Card, card_url: String) -> CreateEmbed {
         } else {
             card.to_string()
         })
-        .url(&card_url)
+        .url(card_url)
         .description({
             let mut description_builder = MessageBuilder::default();
             if let Some(indicator) = card.color_indicator() {
@@ -536,7 +537,7 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                     let db = data.get::<CardDb>().ok_or(Error::MissingCardDb)?;
                     let mut oks = 0;
                     let mut errs = 0;
-                    for card_name in matches {
+                    for (card_name, card_url) in matches {
                         let card = match db.card(&card_name) {
                             Some(card) => card,
                             None => {
@@ -546,7 +547,7 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                             }
                         };
                         let check_thread = thread::Builder::new().name("Lore Seeker card check".into()).spawn(move || {
-                            let _ = card_embed(CreateEmbed::default(), card, String::default());
+                            let _ = card_embed(CreateEmbed::default(), card, &card_url);
                         })?;
                         match check_thread.join() {
                             Ok(()) => { oks += 1; }
@@ -637,7 +638,7 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
             } else {
                 None
             };
-            let matches = db.card_fuzzy(query, set_code).into_iter().map(|card| card.to_string());
+            let matches = db.card_fuzzy(query, set_code).into_iter().map(|card| (card.to_string(), format!("https://{}/card?q=!{}", HOSTNAME, urlencoding::encode(&card.to_string())).parse().expect("failed to generate card URL"))); //TODO use exact printing URL
             handle_query_result(&ctx, msg, matches, false, format!("!{}", urlencoding::encode(query)))?;
         }
     }
@@ -649,20 +650,20 @@ fn handle_query(ctx: &Context, msg: &Message, query: &str, random: bool) -> Resu
     handle_query_result(ctx, msg, matches, random, encoded_query)
 }
 
-fn handle_query_result(ctx: &Context, msg: &Message, matches: impl IntoIterator<Item = String>, random: bool, encoded_query: impl fmt::Display) -> Result<(), Error> {
+fn handle_query_result(ctx: &Context, msg: &Message, matches: impl IntoIterator<Item = (String, Url)>, random: bool, encoded_query: impl fmt::Display) -> Result<(), Error> {
     let mut matches = matches.into_iter();
     if random {
         let matches_vec = matches.collect::<Vec<_>>();
-        if let Some(card_name) = matches_vec.choose(&mut thread_rng()) {
-            show_single_card(ctx, msg, &format!("{} card{} found, random card", matches_vec.len(), if matches_vec.len() == 1 { "" } else { "s" }), card_name)?;
+        if let Some(&(ref card_name, ref card_url)) = matches_vec.choose(&mut thread_rng()) {
+            show_single_card(ctx, msg, &format!("{} card{} found, random card", matches_vec.len(), if matches_vec.len() == 1 { "" } else { "s" }), card_name, card_url)?;
         } else {
             msg.reply("no cards found")?;
         }
     } else {
         match (matches.next(), matches.next()) {
             (Some(_), Some(_)) => { msg.reply(&format!("{} cards found: <https://{}/card?q={}>", 2 + matches.count(), HOSTNAME, encoded_query))?; }
-            (Some(card_name), None) => {
-                show_single_card(ctx, msg, "1 card found", &card_name)?;
+            (Some((card_name, card_url)), None) => {
+                show_single_card(ctx, msg, "1 card found", &card_name, &card_url)?;
             }
             (None, _) => { msg.reply("no cards found")?; }
         }
@@ -789,7 +790,7 @@ fn reload_db(ctx_data: &mut ShareMap) -> Result<(), Error> {
     Ok(())
 }
 
-fn resolve_query(query: &str) -> Result<(impl fmt::Display, impl Iterator<Item = String>), Error> {
+fn resolve_query(query: &str) -> Result<(impl fmt::Display, impl Iterator<Item = (String, Url)>), Error> {
     let encoded_query = urlencoding::encode(if query.is_empty() { "*" } else { query });
     let document = {
         let mut response = reqwest::get(&format!("http://localhost:18803/list?q={}", encoded_query))?.error_for_status()?;
@@ -801,7 +802,22 @@ fn resolve_query(query: &str) -> Result<(impl fmt::Display, impl Iterator<Item =
         .next().ok_or(Error::MissingCardList)?
         .as_node()
         .children()
-        .filter_map(|node| node.first_child().and_then(|text_node| text_node.as_text().map(|text| text.borrow().trim().to_owned())));
+        .filter_map(|li_node|
+            li_node.first_child()
+            .and_then(|a_node|
+                a_node.as_element()
+                .and_then(|a_elt|
+                    a_node.first_child()
+                    .and_then(|text_node|
+                        a_elt.attributes.borrow().get("href").and_then(|href| href.parse().ok()).and_then(|href|
+                            text_node.as_text().map(|text|
+                                (text.borrow().trim().to_owned(), href)
+                            )
+                        )
+                    )
+                )
+            )
+        );
     Ok((encoded_query, matches))
 }
 
@@ -814,8 +830,7 @@ fn send_ipc_command<T: fmt::Display, I: IntoIterator<Item = T>>(cmd: I) -> Resul
     Ok(buf)
 }
 
-fn show_single_card(ctx: &Context, msg: &Message, reply_text: &str, card_name: &str) -> Result<(), Error> {
-    let card_url = format!("https://{}/card?q=!{}", HOSTNAME, urlencoding::encode(card_name)); //TODO use exact printing URL
+fn show_single_card(ctx: &Context, msg: &Message, reply_text: &str, card_name: &str, card_url: &Url) -> Result<(), Error> {
     let mut reply = msg.reply(&format!("{}: <{}>", reply_text, card_url))?;
     let card = {
         let data = ctx.data.lock();
