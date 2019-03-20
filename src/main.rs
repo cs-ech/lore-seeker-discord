@@ -812,11 +812,12 @@ fn resolve_query(query: &str) -> Result<(String, Vec<(String, Url)>), Error> {
         .next()
         .ok_or(Error::MissingCardList)?;
     let mut matches = Vec::default();
+    let base_url = Url::parse(&format!("https://{}/", HOSTNAME))?;
     for li_node in card_list.as_node().children() {
         let a_node = li_node.first_child().ok_or(Error::MissingANode)?;
         let a_elt = a_node.as_element().ok_or(Error::MissingANode)?;
         let text_node = a_node.first_child().ok_or(Error::MissingTextNode)?;
-        let href = a_elt.attributes.borrow().get("href").ok_or(Error::MissingHref).and_then(|href| href.parse().map_err(Error::from))?;
+        let href = a_elt.attributes.borrow().get("href").ok_or(Error::MissingHref).and_then(|href| base_url.join(href).map_err(Error::from))?;
         let text = text_node.as_text().ok_or(Error::MissingTextNode)?;
         matches.push((text.borrow().trim().to_owned(), href));
     }
