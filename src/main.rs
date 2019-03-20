@@ -345,12 +345,15 @@ pub enum Error {
     Env(env::VarError),
     Io(io::Error),
     Json(serde_json::Error),
+    MissingANode,
     MissingCardDb,
     MissingCardList,
     MissingContext,
+    MissingHref,
     MissingInlineChannels,
     MissingNewline,
     MissingOwners,
+    MissingTextNode,
     MomirMissingCmc,
     NoSuchCard(String),
     OwnerCheck,
@@ -359,7 +362,8 @@ pub enum Error {
     Reqwest(reqwest::Error),
     Serenity(serenity::Error),
     Shlex,
-    UnknownCommand(String)
+    UnknownCommand(String),
+    UrlParse(url::ParseError)
 }
 
 impl<'a> From<PoisonError<RwLockReadGuard<'a, serenity::cache::Cache>>> for Error {
@@ -407,6 +411,12 @@ impl From<serde_json::Error> for Error {
 impl From<serenity::Error> for Error {
     fn from(e: serenity::Error) -> Error {
         Error::Serenity(e)
+    }
+}
+
+impl From<url::ParseError> for Error {
+    fn from(e: url::ParseError) -> Error {
+        Error::UrlParse(e)
     }
 }
 
@@ -532,7 +542,6 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                     reload_db(&mut data)?;
                     msg.reply("done, resolving query…")?;
                     let (encoded_query, matches) = resolve_query(query)?;
-                    let matches = matches.collect::<Vec<_>>();
                     msg.reply(&format!("{} cards found: <https://{}/card?q={}>. Checking cards…", matches.len(), HOSTNAME, encoded_query))?;
                     let db = data.get::<CardDb>().ok_or(Error::MissingCardDb)?;
                     let mut oks = 0;
@@ -790,7 +799,7 @@ fn reload_db(ctx_data: &mut ShareMap) -> Result<(), Error> {
     Ok(())
 }
 
-fn resolve_query(query: &str) -> Result<(impl fmt::Display, impl Iterator<Item = (String, Url)>), Error> {
+fn resolve_query(query: &str) -> Result<(String, Vec<(String, Url)>), Error> {
     let encoded_query = urlencoding::encode(if query.is_empty() { "*" } else { query });
     let document = {
         let mut response = reqwest::get(&format!("http://localhost:18803/list?q={}", encoded_query))?.error_for_status()?;
@@ -798,26 +807,19 @@ fn resolve_query(query: &str) -> Result<(impl fmt::Display, impl Iterator<Item =
         response.read_to_string(&mut response_content)?;
         kuchiki::parse_html().one(response_content)
     };
-    let matches = document.select("ul#search-result").map_err(|()| Error::CssSelector)?
-        .next().ok_or(Error::MissingCardList)?
-        .as_node()
-        .children()
-        .filter_map(|li_node|
-            li_node.first_child()
-            .and_then(|a_node|
-                a_node.as_element()
-                .and_then(|a_elt|
-                    a_node.first_child()
-                    .and_then(|text_node|
-                        a_elt.attributes.borrow().get("href").and_then(|href| href.parse().ok()).and_then(|href|
-                            text_node.as_text().map(|text|
-                                (text.borrow().trim().to_owned(), href)
-                            )
-                        )
-                    )
-                )
-            )
-        );
+    let card_list = document.select("ul#search-result")
+        .map_err(|()| Error::CssSelector)?
+        .next()
+        .ok_or(Error::MissingCardList)?;
+    let mut matches = Vec::default();
+    for li_node in card_list.as_node().children() {
+        let a_node = li_node.first_child().ok_or(Error::MissingANode)?;
+        let a_elt = a_node.as_element().ok_or(Error::MissingANode)?;
+        let text_node = a_node.first_child().ok_or(Error::MissingTextNode)?;
+        let href = a_elt.attributes.borrow().get("href").ok_or(Error::MissingHref).and_then(|href| href.parse().map_err(Error::from))?;
+        let text = text_node.as_text().ok_or(Error::MissingTextNode)?;
+        matches.push((text.borrow().trim().to_owned(), href));
+    }
     Ok((encoded_query, matches))
 }
 
