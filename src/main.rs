@@ -339,7 +339,6 @@ impl EventHandler for Handler {
 
 #[derive(Debug)]
 pub enum Error {
-    CssSelector,
     Db(mtg::card::DbError),
     DmOnlyCommand,
     Env(env::VarError),
@@ -347,6 +346,7 @@ pub enum Error {
     Json(serde_json::Error),
     MissingANode,
     MissingCardDb,
+    MissingCardLink,
     MissingCardList,
     MissingContext,
     MissingHref,
@@ -807,14 +807,14 @@ fn resolve_query(query: &str) -> Result<(String, Vec<(String, Url)>), Error> {
         response.read_to_string(&mut response_content)?;
         kuchiki::parse_html().one(response_content)
     };
-    let card_list = document.select("ul#search-result")
-        .map_err(|()| Error::CssSelector)?
-        .next()
-        .ok_or(Error::MissingCardList)?;
+    let card_list_data = document.select_first("ul#search-result").map_err(|()| Error::MissingCardList)?;
+    let card_list = card_list_data.as_node();
     let mut matches = Vec::default();
     let base_url = Url::parse(&format!("https://{}/", HOSTNAME))?;
-    for li_node in card_list.as_node().children() {
-        let a_node = li_node.first_child().ok_or(Error::MissingANode)?;
+    for li_node_data in card_list.select("li").map_err(|()| Error::MissingCardList)? {
+        let li_node = li_node_data.as_node();
+        let a_node_data = li_node.select_first("a").map_err(|()| Error::MissingCardLink)?;
+        let a_node = a_node_data.as_node();
         let a_elt = a_node.as_element().ok_or(Error::MissingANode)?;
         let text_node = a_node.first_child().ok_or(Error::MissingTextNode)?;
         let href = a_elt.attributes.borrow().get("href").ok_or(Error::MissingHref).and_then(|href| base_url.join(href).map_err(Error::from))?;
