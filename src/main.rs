@@ -240,6 +240,12 @@ impl Key for InlineChannels {
     type Value = HashSet<ChannelId>;
 }
 
+struct InlineGuilds;
+
+impl Key for InlineGuilds {
+    type Value = HashSet<GuildId>;
+}
+
 struct Owners;
 
 impl Key for Owners {
@@ -265,6 +271,8 @@ pub fn shut_down(ctx: &Context) {
 struct Config {
     #[serde(default)]
     inline_channels: HashSet<ChannelId>,
+    #[serde(default)]
+    inline_guilds: HashSet<GuildId>,
     bot_token: String
 }
 
@@ -510,7 +518,9 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
     let current_user_id = serenity::CACHE.read().user.id;
     let is_inline_channel = {
         let ctx_data = ctx.data.lock();
-        ctx_data.get::<InlineChannels>().ok_or(Error::MissingInlineChannels)?.contains(&msg.channel_id)
+        let inline_guilds = ctx_data.get::<InlineGuilds>().ok_or(Error::MissingInlineChannels)?;
+        msg.guild_id.map_or(false, |guild_id| inline_guilds.contains(&guild_id))
+        || ctx_data.get::<InlineChannels>().ok_or(Error::MissingInlineChannels)?.contains(&msg.channel_id)
     };
     let query = &mut if msg.content.starts_with(&current_user_id.mention()) { //TODO allow <@!id> mentions
         let mut query = &msg.content[current_user_id.mention().len()..];
@@ -866,6 +876,7 @@ fn main() -> Result<(), Error> {
             let mut data = client.data.lock();
             data.insert::<Owners>(owners);
             data.insert::<InlineChannels>(config.inline_channels);
+            data.insert::<InlineGuilds>(config.inline_guilds);
             data.insert::<ShardManagerContainer>(Arc::clone(&client.shard_manager));
             // load cards before going online
             print!("[....] loading cards");
