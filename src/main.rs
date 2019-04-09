@@ -644,20 +644,22 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
     } else if let (Some(start_idx), Some(end_idx)) = (msg.content.find("[["), msg.content.find("]]")) {
         let ctx_data = ctx.data.lock();
         if is_inline_channel && start_idx < end_idx {
-            let db = ctx_data.get::<CardDb>().ok_or(Error::MissingCardDb)?;
-            let mut query = &msg.content[start_idx + 2..end_idx];
-            let set_code = if let Some(colon_idx) = query.find(":") {
-                let set_code = &query[..colon_idx];
-                if db.set_codes().contains(set_code) {
-                    query = &query[colon_idx + 1..];
-                    Some(set_code)
+            let matches = {
+                let db = ctx_data.get::<CardDb>().ok_or(Error::MissingCardDb)?;
+                let mut query = &msg.content[start_idx + 2..end_idx];
+                let set_code = if let Some(colon_idx) = query.find(":") {
+                    let set_code = &query[..colon_idx];
+                    if db.set_codes().contains(set_code) {
+                        query = &query[colon_idx + 1..];
+                        Some(set_code)
+                    } else {
+                        None
+                    }
                 } else {
                     None
-                }
-            } else {
-                None
-            };
-            let matches = db.card_fuzzy(query, set_code).into_iter().map(|card| (card.to_string(), format!("https://{}/card?q=!{}", HOSTNAME, urlencoding::encode(&card.to_string())).parse().expect("failed to generate card URL"))); //TODO use exact printing URL
+                };
+                db.card_fuzzy(query, set_code)
+            }.into_iter().map(|card| (card.to_string(), format!("https://{}/card?q=!{}", HOSTNAME, urlencoding::encode(&card.to_string())).parse().expect("failed to generate card URL"))); //TODO use exact printing URL
             handle_query_result(&ctx, msg, matches, false, format!("!{}", urlencoding::encode(query)))?;
         }
     }
