@@ -642,9 +642,9 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
     } else if query.len() > 0 {
         handle_query(&ctx, msg, query, false)?;
     } else if let (Some(start_idx), Some(end_idx)) = (msg.content.find("[["), msg.content.find("]]")) {
-        let ctx_data = ctx.data.lock();
         if is_inline_channel && start_idx < end_idx {
             let matches = {
+                let ctx_data = ctx.data.lock();
                 let db = ctx_data.get::<CardDb>().ok_or(Error::MissingCardDb)?;
                 let mut query = &msg.content[start_idx + 2..end_idx];
                 let set_code = if let Some(colon_idx) = query.find(":") {
