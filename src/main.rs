@@ -641,26 +641,33 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
         }
     } else if query.len() > 0 {
         handle_query(&ctx, msg, query, false)?;
-    } else if let (Some(start_idx), Some(end_idx)) = (msg.content.find("[["), msg.content.find("]]")) {
-        if is_inline_channel && start_idx < end_idx {
-            let matches = {
-                let ctx_data = ctx.data.lock();
-                let db = ctx_data.get::<CardDb>().ok_or(Error::MissingCardDb)?;
-                let mut query = &msg.content[start_idx + 2..end_idx];
-                let set_code = if let Some(colon_idx) = query.find(":") {
-                    let set_code = &query[..colon_idx];
-                    if db.set_codes().contains(set_code) {
-                        query = &query[colon_idx + 1..];
-                        Some(set_code)
+    } else if is_inline_channel {
+        let mut remaining_msg = &msg.content[..];
+        while let Some(start_idx) = remaining_msg.find("[[") {
+            if let Some(end_offset) = remaining_msg[start_idx..].find("]]") {
+                let end_idx = start_idx + end_offset;
+                let matches = {
+                    let ctx_data = ctx.data.lock();
+                    let db = ctx_data.get::<CardDb>().ok_or(Error::MissingCardDb)?;
+                    let mut query = &remaining_msg[start_idx + 2..end_idx];
+                    let set_code = if let Some(colon_idx) = query.find(":") {
+                        let set_code = &query[..colon_idx];
+                        if db.set_codes().contains(set_code) {
+                            query = &query[colon_idx + 1..];
+                            Some(set_code)
+                        } else {
+                            None
+                        }
                     } else {
                         None
-                    }
-                } else {
-                    None
-                };
-                db.card_fuzzy(query, set_code)
-            }.into_iter().map(|card| (card.to_string(), format!("https://{}/card?q=!{}", HOSTNAME, urlencoding::encode(&card.to_string())).parse().expect("failed to generate card URL"))); //TODO use exact printing URL
-            handle_query_result(&ctx, msg, matches, false, format!("!{}", urlencoding::encode(query)))?;
+                    };
+                    db.card_fuzzy(query, set_code)
+                }.into_iter().map(|card| (card.to_string(), format!("https://{}/card?q=!{}", HOSTNAME, urlencoding::encode(&card.to_string())).parse().expect("failed to generate card URL"))); //TODO use exact printing URL
+                handle_query_result(&ctx, msg, matches, false, format!("!{}", urlencoding::encode(query)))?; //TODO fix query
+                remaining_msg = &remaining_msg[end_idx + 2..];
+            } else {
+                break;
+            }
         }
     }
     Ok(())
@@ -676,7 +683,7 @@ fn handle_query_result(ctx: &Context, msg: &Message, matches: impl IntoIterator<
     if random {
         let matches_vec = matches.collect::<Vec<_>>();
         if let Some(&(ref card_name, ref card_url)) = matches_vec.choose(&mut thread_rng()) {
-            show_single_card(ctx, msg, &format!("{} card{} found, random card", matches_vec.len(), if matches_vec.len() == 1 { "" } else { "s" }), card_name, card_url)?;
+            show_single_card(ctx, msg, Some(&format!("{} card{} found, random card", matches_vec.len(), if matches_vec.len() == 1 { "" } else { "s" })), card_name, card_url)?;
         } else {
             msg.reply("no cards found")?;
         }
@@ -684,7 +691,7 @@ fn handle_query_result(ctx: &Context, msg: &Message, matches: impl IntoIterator<
         match (matches.next(), matches.next()) {
             (Some(_), Some(_)) => { msg.reply(&format!("{} cards found: <https://{}/card?q={}>", 2 + matches.count(), HOSTNAME, encoded_query))?; }
             (Some((card_name, card_url)), None) => {
-                show_single_card(ctx, msg, "1 card found", &card_name, &card_url)?;
+                show_single_card(ctx, msg, None, &card_name, &card_url)?;
             }
             (None, _) => { msg.reply("no cards found")?; }
         }
@@ -845,16 +852,25 @@ fn send_ipc_command<T: fmt::Display, I: IntoIterator<Item = T>>(cmd: I) -> Resul
     Ok(buf)
 }
 
-fn show_single_card(ctx: &Context, msg: &Message, reply_text: &str, card_name: &str, card_url: &Url) -> Result<(), Error> {
-    let mut reply = msg.reply(&format!("{}: <{}>", reply_text, card_url))?;
+fn show_single_card(ctx: &Context, msg: &Message, reply_text: Option<&str>, card_name: &str, card_url: &Url) -> Result<(), Error> {
     let card = {
         let data = ctx.data.lock();
-        let db = data.get::<CardDb>().ok_or(Error::MissingCardDb)?;
-        db.card(card_name).ok_or(Error::NoSuchCard(card_name.to_owned()))?
+        data.get::<CardDb>().and_then(|db| db.card(card_name))
     };
-    reply.edit(|m| m
-        .embed(|e| card_embed(e, card, card_url))
-    )?;
+    msg.channel_id.send_message(|m| {
+        let m = match (reply_text, card.is_some()) {
+            (None, true) => m,
+            (_, _) => {
+                let reply_text = reply_text.unwrap_or("1 card found");
+                m.content(MessageBuilder::default().mention(&msg.author).push(format!(": {}: <{}>", reply_text, card_url)))
+            }
+        };
+        if let Some(card) = card {
+            m.embed(|e| card_embed(e, card, card_url))
+        } else {
+            m
+        }
+    })?;
     Ok(())
 }
 
