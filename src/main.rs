@@ -17,6 +17,7 @@ use std::{
         BufReader,
         prelude::*
     },
+    iter,
     net::{
         TcpListener,
         TcpStream
@@ -647,7 +648,19 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
             if let Some(end_offset) = remaining_msg[start_idx..].find("]]") {
                 let end_idx = start_idx + end_offset;
                 let query = &remaining_msg[start_idx + 2..end_idx];
-                handle_query(&ctx, msg, query, false)?;
+                if let Some(card) = {
+                    let ctx_data = ctx.data.lock();
+                    let db = ctx_data.get::<CardDb>().ok_or(Error::MissingCardDb)?;
+                    db.card_fuzzy(query)
+                } {
+                    handle_query_result(&ctx, msg,
+                        iter::once((card.to_string(), format!("https://{}/card?q=!{}", HOSTNAME, urlencoding::encode(&card.to_string())).parse().expect("failed to generate card URL"))), //TODO use exact printing URL
+                        false,
+                        format!("!{}", urlencoding::encode(query)) //TODO fix query
+                    )?;
+                } else {
+                    handle_query(&ctx, msg, query, false)?;
+                }
                 remaining_msg = &remaining_msg[end_idx + 2..];
             } else {
                 break;
