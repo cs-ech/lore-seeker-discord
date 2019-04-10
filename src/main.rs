@@ -646,24 +646,8 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
         while let Some(start_idx) = remaining_msg.find("[[") {
             if let Some(end_offset) = remaining_msg[start_idx..].find("]]") {
                 let end_idx = start_idx + end_offset;
-                let matches = {
-                    let ctx_data = ctx.data.lock();
-                    let db = ctx_data.get::<CardDb>().ok_or(Error::MissingCardDb)?;
-                    let mut query = &remaining_msg[start_idx + 2..end_idx];
-                    let set_code = if let Some(colon_idx) = query.find(":") {
-                        let set_code = &query[..colon_idx];
-                        if db.set_codes().contains(set_code) {
-                            query = &query[colon_idx + 1..];
-                            Some(set_code)
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
-                    db.card_fuzzy(query, set_code)
-                }.into_iter().map(|card| (card.to_string(), format!("https://{}/card?q=!{}", HOSTNAME, urlencoding::encode(&card.to_string())).parse().expect("failed to generate card URL"))); //TODO use exact printing URL
-                handle_query_result(&ctx, msg, matches, false, format!("!{}", urlencoding::encode(query)))?; //TODO fix query
+                let query = &remaining_msg[start_idx + 2..end_idx];
+                handle_query(&ctx, msg, query, false)?;
                 remaining_msg = &remaining_msg[end_idx + 2..];
             } else {
                 break;
