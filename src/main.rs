@@ -518,10 +518,11 @@ fn eat_word(subj: &mut &str) -> Option<String> {
 fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
     let current_user_id = serenity::CACHE.read().user.id;
     let is_inline_channel = {
+        // guild in inlineGuilds xor channel in inlineChannels
         let ctx_data = ctx.data.lock();
         let inline_guilds = ctx_data.get::<InlineGuilds>().ok_or(Error::MissingInlineChannels)?;
         msg.guild_id.map_or(false, |guild_id| inline_guilds.contains(&guild_id))
-        || ctx_data.get::<InlineChannels>().ok_or(Error::MissingInlineChannels)?.contains(&msg.channel_id)
+        != ctx_data.get::<InlineChannels>().ok_or(Error::MissingInlineChannels)?.contains(&msg.channel_id)
     };
     let query = &mut if msg.content.starts_with(&current_user_id.mention()) { //TODO allow <@!id> mentions
         let mut query = &msg.content[current_user_id.mention().len()..];
