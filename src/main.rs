@@ -591,6 +591,48 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                     msg.react("✅")?;
                     return Ok(());
                 }
+                "booster" | "boosters" | "pack" | "packs" | "sealed" => {
+                    while let Some(set_code) = eat_word(query) {
+                        let document = {
+                            let mut response = reqwest::get(&format!("https://{}/sealed?count[]=1&set[]={}", HOSTNAME, set_code.to_ascii_lowercase()))?.error_for_status()?;
+                            let mut response_content = String::default();
+                            response.read_to_string(&mut response_content)?;
+                            kuchiki::parse_html().one(response_content)
+                        };
+                        let base_url = Url::parse(&format!("https://{}/", HOSTNAME))?;
+                        let set_name = document.select_first(".pack_selection .selection .select2-selection__rendered").ok()
+                            .and_then(|node_data| node_data.as_node().as_element()
+                                .and_then(|elt| elt.attributes.borrow().get("title").map(ToString::to_string))
+                            )
+                            .unwrap_or(set_code);
+                        let cards = document.select(".card_picture_cell").map_err(|()| Error::MissingCardList)?.map(|cell| {
+                            let cell_node: &kuchiki::NodeRef = cell.as_node();
+                            let a_node_data = cell_node.select_first("a").map_err(|()| Error::MissingCardLink)?;
+                            let a_node = a_node_data.as_node();
+                            let a_elt = a_node.as_element().ok_or(Error::MissingANode)?;
+                            let href = a_elt.attributes.borrow().get("href").ok_or(Error::MissingHref).and_then(|href| base_url.join(href).map_err(Error::from))?;
+                            let img_node_data = a_node.select_first("img").map_err(|()| Error::MissingTextNode)?;
+                            let img_node = img_node_data.as_node();
+                            let img_elt = img_node.as_element().ok_or(Error::MissingTextNode)?;
+                            let card_name = img_elt.attributes.borrow().get("alt").ok_or(Error::MissingTextNode)?.to_string();
+                            Ok::<_, Error>((card_name, href))
+                        }).collect::<Result<Vec<_>, _>>()?;
+                        msg.channel_id.send_message(|m| {
+                            m.embed(|e| e
+                                .title(MessageBuilder::default().push_italic_safe(set_name).push(" booster"))
+                                .description({
+                                    let mut builder = MessageBuilder::default();
+                                    for (card_name, href) in cards {
+                                        builder = builder.push_safe(card_name).push_line(format!(" (<{}>)", href));
+                                    }
+                                    builder
+                                })
+                            )
+                        })?;
+                        eat_whitespace(query);
+                    }
+                    return Ok(());
+                }
                 "mjt" => {
                     // Mental Judge Tower, for real cards
                     let mut players = Vec::default();
