@@ -49,26 +49,8 @@ use serde_derive::Deserialize;
 use serenity::{
     builder::CreateEmbed,
     client::bridge::gateway::ShardManager,
-    model::{
-        channel::{
-            Message,
-            ReactionType
-        },
-        gateway::Ready,
-        guild::{
-            Emoji,
-            Guild,
-            Member
-        },
-        id::{
-            ChannelId,
-            EmojiId,
-            GuildId,
-            UserId
-        },
-        permissions::Permissions,
-        user::User
-    },
+    http::raw::get_webhook_with_token,
+    model::prelude::*,
     prelude::*,
     utils::MessageBuilder
 };
@@ -259,12 +241,20 @@ impl Key for ShardManagerContainer {
     type Value = Arc<Mutex<ShardManager>>;
 }
 
-/// Utility function to shut down all shards.
-pub fn shut_down(ctx: &Context) {
-    ctx.invisible(); // hack to prevent the bot showing as online when it's not
-    let data = ctx.data.lock();
-    let mut shard_manager = data.get::<ShardManagerContainer>().expect("missing shard manager").lock();
-    shard_manager.shutdown_all();
+#[derive(Deserialize)]
+struct WebhookData {
+    id: WebhookId,
+    token: String
+}
+
+impl Key for WebhookData {
+    type Value = HashMap<ChannelId, Webhook>;
+}
+
+impl WebhookData {
+    fn to_webhook(&self) -> serenity::Result<Webhook> {
+        get_webhook_with_token(self.id.0, &self.token)
+    }
 }
 
 #[derive(Deserialize)]
@@ -274,7 +264,9 @@ struct Config {
     inline_channels: HashSet<ChannelId>,
     #[serde(default)]
     inline_guilds: HashSet<GuildId>,
-    bot_token: String
+    bot_token: String,
+    #[serde(default)]
+    webhooks: HashMap<ChannelId, WebhookData>
 }
 
 #[derive(Default)]
@@ -544,6 +536,10 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                     shut_down(&ctx);
                     return Ok(());
                 }
+                "ping" => {
+                    msg.reply("pong")?;
+                    return Ok(());
+                }
                 "check" => {
                     owner_check(&ctx, &msg)?;
                     if !msg.is_private() {
@@ -617,18 +613,37 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                             let card_name = img_elt.attributes.borrow().get("alt").ok_or(Error::MissingTextNode)?.to_string();
                             Ok::<_, Error>((card_name, href))
                         }).collect::<Result<Vec<_>, _>>()?;
-                        msg.channel_id.send_message(|m| {
-                            m.embed(|e| e
-                                .title(MessageBuilder::default().push_italic_safe(set_name).push(" booster"))
-                                .description({
-                                    let mut builder = MessageBuilder::default();
-                                    for (card_name, href) in cards {
-                                        builder = builder.push_safe(card_name).push_line(format!(" (<{}>)", href));
-                                    }
-                                    builder
-                                })
-                            )
-                        })?;
+                        if let Some(webhook) = ctx.data.lock().get::<WebhookData>()
+                            .and_then(|hooks| hooks.get(&msg.channel_id))
+                        {
+                            webhook.execute(false, |e| e
+                                .embeds(vec![
+                                    Embed::fake(|e| e
+                                        .title(MessageBuilder::default().push_italic_safe(set_name).push(" booster"))
+                                        .description({
+                                            let mut builder = MessageBuilder::default();
+                                            for (card_name, href) in cards {
+                                                builder = builder.push('[').push_safe(card_name).push_line(format!("]({})", href));
+                                            }
+                                            builder
+                                        })
+                                    )
+                                ])
+                            )?;
+                        } else {
+                            msg.channel_id.send_message(|m| {
+                                m.embed(|e| e
+                                    .title(MessageBuilder::default().push_italic_safe(set_name).push(" booster"))
+                                    .description({
+                                        let mut builder = MessageBuilder::default();
+                                        for (card_name, href) in cards {
+                                            builder = builder.push_safe(card_name).push_line(format!(" (<{}>)", href));
+                                        }
+                                        builder
+                                    })
+                                )
+                            })?;
+                        }
                         eat_whitespace(query);
                     }
                     return Ok(());
@@ -914,6 +929,14 @@ fn show_single_card(ctx: &Context, msg: &Message, reply_text: Option<&str>, card
     Ok(())
 }
 
+/// Utility function to shut down all shards.
+pub fn shut_down(ctx: &Context) {
+    ctx.invisible(); // hack to prevent the bot showing as online when it's not
+    let data = ctx.data.lock();
+    let mut shard_manager = data.get::<ShardManagerContainer>().expect("missing shard manager").lock();
+    shard_manager.shutdown_all();
+}
+
 fn main() -> Result<(), Error> {
     let mut args = env::args().peekable();
     let _ = args.next(); // ignore executable name
@@ -936,6 +959,7 @@ fn main() -> Result<(), Error> {
             data.insert::<InlineChannels>(config.inline_channels);
             data.insert::<InlineGuilds>(config.inline_guilds);
             data.insert::<ShardManagerContainer>(Arc::clone(&client.shard_manager));
+            data.insert::<WebhookData>(config.webhooks.into_iter().map(|(chan_id, webhook_data)| webhook_data.to_webhook().map(|webhook| (chan_id, webhook))).collect::<serenity::Result<_>>()?);
             // load cards before going online
             print!("[....] loading cards");
             io::stdout().flush()?;
