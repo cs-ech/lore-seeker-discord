@@ -49,7 +49,6 @@ use serde_derive::Deserialize;
 use serenity::{
     builder::CreateEmbed,
     client::bridge::gateway::ShardManager,
-    http::raw::get_webhook_with_token,
     model::prelude::*,
     prelude::*,
     utils::MessageBuilder
@@ -242,31 +241,13 @@ impl Key for ShardManagerContainer {
 }
 
 #[derive(Deserialize)]
-struct WebhookData {
-    id: WebhookId,
-    token: String
-}
-
-impl Key for WebhookData {
-    type Value = HashMap<ChannelId, Webhook>;
-}
-
-impl WebhookData {
-    fn to_webhook(&self) -> serenity::Result<Webhook> {
-        get_webhook_with_token(self.id.0, &self.token)
-    }
-}
-
-#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Config {
     #[serde(default)]
     inline_channels: HashSet<ChannelId>,
     #[serde(default)]
     inline_guilds: HashSet<GuildId>,
-    bot_token: String,
-    #[serde(default)]
-    webhooks: HashMap<ChannelId, WebhookData>
+    bot_token: String
 }
 
 #[derive(Default)]
@@ -613,38 +594,18 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                             let card_name = img_elt.attributes.borrow().get("alt").ok_or(Error::MissingTextNode)?.to_string();
                             Ok::<_, Error>((card_name, href))
                         }).collect::<Result<Vec<_>, _>>()?;
-                        if let Some(webhook) = ctx.data.lock().get::<WebhookData>()
-                            .and_then(|hooks| hooks.get(&msg.channel_id))
-                        {
-                            webhook.execute(false, |e| e
-                                .embeds(vec![
-                                    Embed::fake(|e| e
-                                        .title(MessageBuilder::default().push_italic_safe(set_name).push(" booster"))
-                                        .description({
-                                            let mut builder = MessageBuilder::default();
-                                            for (card_name, href) in cards {
-                                                builder = builder.push('[').push_safe(card_name).push_line(format!("]({})", href));
-                                            }
-                                            builder
-                                        })
-                                    )
-                                ])
-                            )?;
-                        } else {
-                            msg.channel_id.send_message(|m| {
-                                m.embed(|e| e
-                                    .title(MessageBuilder::default().push_italic_safe(set_name).push(" booster"))
-                                    .description({
-                                        let mut builder = MessageBuilder::default();
-                                        for (card_name, href) in cards {
-                                            builder = builder.push_safe(card_name).push_line(format!(" (<{}>)", href));
-                                        }
-                                        builder
-                                    })
-                                )
-                            })?;
-                        }
-                        eat_whitespace(query);
+                        msg.channel_id.send_message(|m| {
+                            m.embed(|e| e
+                                .title(MessageBuilder::default().push_italic_safe(set_name).push(" booster"))
+                                .description({
+                                    let mut builder = MessageBuilder::default();
+                                    for (card_name, href) in cards {
+                                        builder = builder.push('[').push_safe(card_name).push_line(format!("]({})", href));
+                                    }
+                                    builder
+                                })
+                            )
+                        })?;
                     }
                     return Ok(());
                 }
@@ -959,7 +920,6 @@ fn main() -> Result<(), Error> {
             data.insert::<InlineChannels>(config.inline_channels);
             data.insert::<InlineGuilds>(config.inline_guilds);
             data.insert::<ShardManagerContainer>(Arc::clone(&client.shard_manager));
-            data.insert::<WebhookData>(config.webhooks.into_iter().map(|(chan_id, webhook_data)| webhook_data.to_webhook().map(|webhook| (chan_id, webhook))).collect::<serenity::Result<_>>()?);
             // load cards before going online
             print!("[....] loading cards");
             io::stdout().flush()?;
