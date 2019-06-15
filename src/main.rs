@@ -582,18 +582,16 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                 }
                 "booster" | "boosters" | "pack" | "packs" | "sealed" => {
                     while let Some(set_code) = eat_word(query) {
+                        let lower_code = set_code.to_ascii_lowercase();
                         let document = {
-                            let mut response = get(format!("/sealed?count[]=1&set[]={}", set_code.to_ascii_lowercase()))?;
+                            let mut response = get(format!("/sealed?count[]=1&set[]={}", lower_code))?;
                             let mut response_content = String::default();
                             response.read_to_string(&mut response_content)?;
                             kuchiki::parse_html().one(response_content)
                         };
                         let base_url = Url::parse(&format!("https://{}/", HOSTNAME))?;
-                        let set_name = document.select_first(".pack_selection .selection .select2-selection__rendered").ok()
-                            .and_then(|node_data| node_data.as_node().as_element()
-                                .and_then(|elt| elt.attributes.borrow().get("title").map(ToString::to_string))
-                            )
-                            .unwrap_or(set_code);
+                        let set_name = document.select_first(&format!(".pack_selection option[value=\"{}\"]", lower_code)).ok()
+                            .map_or(set_code, |node_data| node_data.text_contents());
                         let cards = document.select(".card_picture_cell").map_err(|()| Error::MissingCardList)?.map(|cell| {
                             let cell_node: &kuchiki::NodeRef = cell.as_node();
                             let a_node_data = cell_node.select_first("a").map_err(|()| Error::MissingCardLink)?;

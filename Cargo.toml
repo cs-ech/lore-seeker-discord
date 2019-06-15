@@ -7,7 +7,6 @@ edition = "2018"
 [[bin]]
 name = "lore-seeker"
 path = "src/main.rs"
-doc = false
 test = false
 bench = false
 
