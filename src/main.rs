@@ -494,7 +494,7 @@ fn get(path: String) -> Result<reqwest::Response, Error> {
         reqwest::ClientBuilder::new()
             .timeout(Some(Duration::from_secs(60))) // increased timeout due to performance issues in %sealed
             .build()?
-            .get(&format!("https://localhost:18803{}", path))
+            .get(&format!("http://localhost:18803{}", path))
             .send()?
             .error_for_status()?
     )
