@@ -489,6 +489,17 @@ fn eat_word(subj: &mut &str) -> Option<String> {
     }
 }
 
+fn get(path: String) -> Result<reqwest::Response, Error> {
+    Ok(
+        reqwest::ClientBuilder::new()
+            .timeout(Some(Duration::from_secs(60))) // increased timeout due to performance issues in %sealed
+            .build()?
+            .get(&format!("https://localhost:18803{}", path))
+            .send()?
+            .error_for_status()?
+    )
+}
+
 fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
     let current_user_id = serenity::CACHE.read().user.id;
     let is_inline_channel = {
@@ -572,7 +583,7 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                 "booster" | "boosters" | "pack" | "packs" | "sealed" => {
                     while let Some(set_code) = eat_word(query) {
                         let document = {
-                            let mut response = reqwest::get(&format!("https://{}/sealed?count[]=1&set[]={}", HOSTNAME, set_code.to_ascii_lowercase()))?.error_for_status()?;
+                            let mut response = get(format!("/sealed?count[]=1&set[]={}", set_code.to_ascii_lowercase()))?;
                             let mut response_content = String::default();
                             response.read_to_string(&mut response_content)?;
                             kuchiki::parse_html().one(response_content)
@@ -838,7 +849,7 @@ fn reload_db(ctx_data: &mut ShareMap) -> Result<(), Error> {
 fn resolve_query(query: &str) -> Result<(String, Vec<(String, Url)>), Error> {
     let encoded_query = urlencoding::encode(if query.is_empty() { "*" } else { query });
     let document = {
-        let mut response = reqwest::get(&format!("http://localhost:18803/list?q={}", encoded_query))?.error_for_status()?;
+        let mut response = get(format!("/list?q={}", encoded_query))?;
         let mut response_content = String::default();
         response.read_to_string(&mut response_content)?;
         kuchiki::parse_html().one(response_content)
