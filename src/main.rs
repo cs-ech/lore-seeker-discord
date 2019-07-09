@@ -35,7 +35,6 @@ use std::{
     thread,
     time::Duration
 };
-use chrono::prelude::*;
 use kuchiki::traits::TendrilSink;
 use mtg::{
     card::{
@@ -306,12 +305,17 @@ impl EventHandler for Handler {
             Err(Error::OwnerCheck) => Some("this command can only be used by the bot owner".into()),
             Err(Error::ParseInt(e)) => Some(MessageBuilder::default().push("invalid number: ").push_safe(e).build()),
             Err(Error::Reqwest(e)) => {
-                println!("{}: Message handler returned reqwest error {:?}", Utc::now().format("%Y-%m-%d %H:%M:%S"), e);
-                Some("failed to connect to Lore Seeker website, try again later".into()) //TODO check if lore-seeker service is running
+                if e.is_timeout() {
+                    println!("Message handler timed out: {:?}", e);
+                    Some("Lore Seeker website not responding, try again later".into())
+                } else {
+                    println!("Message handler returned reqwest error {:?}", e);
+                    Some("failed to connect to Lore Seeker website, try again later".into()) //TODO check if lore-seeker service is running
+                }
             }
             Err(Error::UnknownCommand(cmd)) => Some(MessageBuilder::default().push("unknown command: %").push_safe(cmd).build()),
             Err(e) => {
-                println!("{}: Message handler returned error {:?}", Utc::now().format("%Y-%m-%d %H:%M:%S"), e);
+                println!("Message handler returned error {:?}", e);
                 Some("unknown error (cc <@86841168427495424>)".into())
             }
         } {

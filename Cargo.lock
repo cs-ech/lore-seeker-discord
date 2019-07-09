@@ -662,7 +662,6 @@ dependencies = [
 name = "lore-seeker"
 version = "0.1.0"
 dependencies = [
- "chrono 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "kuchiki 0.7.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "mtg 0.1.0 (git+https://github.com/fenhl/rust-mtg)",
  "rand 0.6.5 (registry+https://github.com/rust-lang/crates.io-index)",
