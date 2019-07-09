@@ -275,8 +275,8 @@ impl EventHandler for Handler {
         *self.0.lock() = Some(ctx.clone());
         let guilds = ready.user.guilds(&ctx).expect("failed to get guilds");
         if guilds.is_empty() {
-            println!("[!!!!] No guilds found, use following URL to invite the bot:");
-            println!("[ ** ] {}", ready.user.invite_url(&ctx, Permissions::READ_MESSAGES | Permissions::SEND_MESSAGES | Permissions::USE_EXTERNAL_EMOJIS).expect("failed to generate invite URL"));
+            println!("No guilds found, use following URL to invite the bot:");
+            println!("{}", ready.user.invite_url(&ctx, Permissions::READ_MESSAGES | Permissions::SEND_MESSAGES | Permissions::USE_EXTERNAL_EMOJIS).expect("failed to generate invite URL"));
             shut_down(&ctx);
         }
     }
@@ -291,7 +291,7 @@ impl EventHandler for Handler {
 
     fn guild_create(&self, _: Context, guild: Guild, _: bool) {
         user_list::set_guild(guild.id, guild.members.values().cloned()).expect("failed to initialize user list");
-        println!("[ ** ] Connected to {}", guild.name);
+        println!("Connected to {}", guild.name);
     }
 
     fn guild_member_addition(&self, _: Context, guild_id: GuildId, member: Member) {
@@ -959,13 +959,13 @@ fn main() -> Result<(), Error> {
             data.insert::<InlineGuilds>(config.inline_guilds);
             data.insert::<ShardManagerContainer>(Arc::clone(&client.shard_manager));
             // load cards before going online
-            print!("[....] loading cards");
+            println!("loading cards");
             io::stdout().flush()?;
             let db = Db::from_sets_dir("/opt/git/github.com/fenhl/lore-seeker/stage/data/sets")?;
             assert!(db.card("Dryad Arbor").ok_or(Error::NoSuchCard("Dryad Arbor".to_owned()))?.loyalty().is_none());
             let num_cards = db.into_iter().count();
             data.insert::<CardDb>(db);
-            println!("\r[ ok ] {} cards loaded", num_cards);
+            println!("{} cards loaded", num_cards);
         }
         // listen for IPC commands
         {
