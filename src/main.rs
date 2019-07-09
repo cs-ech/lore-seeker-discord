@@ -4,207 +4,224 @@
 
 mod user_list;
 
-use std::{
-    collections::{
-        HashMap,
-        HashSet
+use {
+    std::{
+        collections::{
+            HashMap,
+            HashSet
+        },
+        env,
+        fmt,
+        fs::File,
+        io::{
+            self,
+            BufReader,
+            prelude::*
+        },
+        iter,
+        net::{
+            TcpListener,
+            TcpStream
+        },
+        process::{
+            Command,
+            Stdio
+        },
+        str::FromStr,
+        sync::{
+            Arc,
+            PoisonError,
+            RwLockReadGuard
+        },
+        thread,
+        time::Duration
     },
-    env,
-    fmt,
-    fs::File,
-    io::{
-        self,
-        BufReader,
-        prelude::*
+    kuchiki::traits::TendrilSink,
+    mtg::{
+        card::{
+            Card,
+            Db
+        },
+        color::ColorSet
     },
-    iter,
-    net::{
-        TcpListener,
-        TcpStream
+    rand::prelude::*,
+    serde_derive::Deserialize,
+    serenity::{
+        builder::CreateEmbed,
+        cache::CacheRwLock,
+        client::bridge::gateway::ShardManager,
+        model::prelude::*,
+        prelude::*,
+        utils::MessageBuilder
     },
-    process::{
-        Command,
-        Stdio
+    typemap::{
+        Key,
+        ShareMap
     },
-    str::FromStr,
-    sync::{
-        Arc,
-        PoisonError,
-        RwLockReadGuard
-    },
-    thread,
-    time::Duration
+    url::Url
 };
-use kuchiki::traits::TendrilSink;
-use mtg::{
-    card::{
-        Card,
-        Db
-    },
-    color::ColorSet
-};
-use rand::prelude::*;
-use serde_derive::Deserialize;
-use serenity::{
-    builder::CreateEmbed,
-    client::bridge::gateway::ShardManager,
-    model::prelude::*,
-    prelude::*,
-    utils::MessageBuilder
-};
-use typemap::{
-    Key,
-    ShareMap
-};
-use url::Url;
 
 macro_rules! manamoji {
-    ($($sym:expr => $name:expr, $id:expr;)+) => {
+    ($($sym:expr => $id:expr;)+) => {
         #[allow(unused)] //TODO
-        fn manamoji(s: &str) -> Option<ReactionType> {
+        fn manamoji(&self, s: &str) -> Option<Emoji> {
             match s {
-                $($sym => Some(ReactionType::Custom {
-                    id: EmojiId($id),
-                    name: Some($name.to_owned()),
-                    animated: false
-                }),)+
+                $($sym => self
+                    .as_ref()
+                    .read()
+                    .guilds
+                    .values()
+                    .filter_map(|guild| guild.read().emojis.get(&EmojiId($id)).cloned())
+                    .next(),
+                )+
                 _ => None
             }
         }
 
-        fn with_manamoji<S: ToString>(s: S) -> String {
+        fn with_manamoji(&self, s: impl ToString) -> String {
             let s = s.to_string();
             $(
                 let mut split = s.split($sym);
-                let mut s = split.next().expect("failed to convert manamoji").to_owned();
+                let mut builder = MessageBuilder::default();
+                builder.push_safe(split.next().expect("failed to convert manamoji"));
                 for part in split {
-                    s.push_str(&ReactionType::Custom {
-                        id: EmojiId($id),
-                        name: Some($name.to_owned()),
-                        animated: false
-                    }.to_string());
-                    s.push_str(part);
+                    if let Some(emoji) = self.manamoji($sym) {
+                        builder.emoji(&emoji);
+                    } else {
+                        builder.push_safe($sym);
+                    }
+                    builder.push_safe(part);
                 }
+                let s = builder.build();
             )+
             s
         }
     };
 }
 
-manamoji! {
-    "{0}" => "mana0", 386740600436686878;
-    "{1}" => "mana1", 386740600399069204;
-    "{10}" => "mana10", 386740603708506142;
-    "{11}" => "mana11", 386741116927475718;
-    "{12}" => "mana12", 386741117577592833;
-    "{13}" => "mana13", 386741118303469570;
-    "{14}" => "mana14", 386741118668242964;
-    "{15}" => "mana15", 386741118273847307;
-    "{16}" => "mana16", 386741118597070850;
-    "{17}" => "mana17", 386741120434044948;
-    "{18}" => "mana18", 386741120006094860;
-    "{19}" => "mana19", 386741120371261449;
-    "{2}" => "mana2", 386740600755453953;
-    "{2/B}" => "mana2b", 386741115807596547;
-    "{2/G}" => "mana2g", 386741116118106122;
-    "{2/R}" => "mana2r", 386741116222963712;
-    "{2/U}" => "mana2u", 386741115933687809;
-    "{2/W}" => "mana2w", 386741116462039043;
-    "{20}" => "mana20", 386741120543227906;
-    "{3}" => "mana3", 386740601082871822;
-    "{4}" => "mana4", 386740601556828160;
-    "{5}" => "mana5", 386740601724338176;
-    "{6}" => "mana6", 386740602265403392;
-    "{7}" => "mana7", 386740602374717440;
-    "{8}" => "mana8", 386740602747879435;
-    "{9}" => "mana9", 386740603494334484;
-    "{A}" => "manarunic", 483811996924379156;
-    "{B}" => "manab", 386740604341583873;
-    "{B/G}" => "manabg", 386740605847470081;
-    "{B/P}" => "manabp", 386741121486815232;
-    "{B/R}" => "manabr", 386740607017549838;
-    "{C}" => "manac", 386740607416139777;
-    "{CHAOS}" => "manachaos", 386741121608318986;
-    "{DISCOVER}" => "manadiscover", 583092272028057601;
-    "{E}" => "manae", 386741121780416513;
-    "{G}" => "manag", 386740607827181569;
-    "{G/P}" => "managp", 386741122225012761;
-    "{G/U}" => "managu", 386740607906873344;
-    "{G/W}" => "managw", 386740607994953728;
-    "{P}" => "manap", 483816536176590898;
-    "{Q}" => "manaq", 386741125987434506;
-    "{R}" => "manar", 386740612394778634;
-    "{R/G}" => "manarg", 386740613430640640;
-    "{R/P}" => "manarp", 386741125773262860;
-    "{R/W}" => "manarw", 386740615498563588;
-    "{S}" => "manas", 386741126939541505;
-    "{T}" => "manat", 386740612143120385;
-    "{U}" => "manau", 386740612289789953;
-    "{U/B}" => "manaub", 386740615683112992;
-    "{U/P}" => "manaup", 386741126247350284;
-    "{U/R}" => "manaur", 386740615649558534;
-    "{W}" => "manaw", 386740617792978944;
-    "{W/B}" => "manawb", 386740617780264960;
-    "{W/P}" => "manawp", 386741126645809162;
-    "{W/U}" => "manawu", 386740617792978964;
-    "{X}" => "manax", 386740617667018752;
-    "{Y}" => "manay", 386741126457065473;
-    "{Z}" => "manaz", 386741127207845890;
-    "{hr}" => "manahr", 386741125672730634;
-    "{hw}" => "manahw", 386741125773262848;
-    "{½}" => "manahalf", 386741122510225421;
-    "{∞}" => "manainfinity", 386741125861605387;
-}
-
 macro_rules! indicator_emoji {
-    ($($colors:pat => $name:expr, $id:expr;)+) => {
-        fn indicator_emoji(colors: &ColorSet) -> Emoji {
+    ($($colors:pat => $id:expr;)+) => {
+        fn indicator_emoji(&self, colors: &ColorSet) -> Option<Emoji> {
             match *colors {
-                $($colors => Emoji {
-                    animated: false,
-                    id: EmojiId($id),
-                    name: $name.to_owned(),
-                    managed: false,
-                    require_colons: true,
-                    roles: Vec::default()
-                },)+
+                $($colors => self
+                    .as_ref()
+                    .read()
+                    .guilds
+                    .values()
+                    .filter_map(|guild| guild.read().emojis.get(&EmojiId($id)).cloned())
+                    .next(),
+                )+
             }
         }
     };
 }
-indicator_emoji! {
-    ColorSet { white: false, blue: false, black: false, red: false, green: false } => "in_c", 493537120628244481;
-    ColorSet { white: true, blue: false, black: false, red: false, green: false } => "in_w", 493480100252352512;
-    ColorSet { white: false, blue: true, black: false, red: false, green: false } => "in_u", 493480399532589067;
-    ColorSet { white: false, blue: false, black: true, red: false, green: false } => "in_b", 493480399146844171;
-    ColorSet { white: false, blue: false, black: false, red: true, green: false } => "in_r", 493480399545040910;
-    ColorSet { white: false, blue: false, black: false, red: false, green: true } => "in_g", 493480399737978883;
-    ColorSet { white: true, blue: true, black: false, red: false, green: false } => "in_wu", 493518454775873536;
-    ColorSet { white: false, blue: true, black: true, red: false, green: false } => "in_ub", 493518454033219585;
-    ColorSet { white: false, blue: false, black: true, red: true, green: false } => "in_br", 493518453249015809;
-    ColorSet { white: false, blue: false, black: false, red: true, green: true } => "in_rg", 493518453886550016;
-    ColorSet { white: true, blue: false, black: false, red: false, green: true } => "in_gw", 493518453919973407;
-    ColorSet { white: true, blue: false, black: true, red: false, green: false } => "in_wb", 493518454108979202;
-    ColorSet { white: false, blue: true, black: false, red: true, green: false } => "in_ur", 493518454268100650;
-    ColorSet { white: false, blue: false, black: true, red: false, green: true } => "in_bg", 493518453123186689;
-    ColorSet { white: true, blue: false, black: false, red: true, green: false } => "in_rw", 493518453999927307;
-    ColorSet { white: false, blue: true, black: false, red: false, green: true } => "in_gu", 493518453249015810;
-    ColorSet { white: true, blue: true, black: false, red: false, green: true } => "in_gwu", 493531781744689153;
-    ColorSet { white: true, blue: true, black: true, red: false, green: false } => "in_wub", 493531782210125864;
-    ColorSet { white: false, blue: true, black: true, red: true, green: false } => "in_ubr", 493531782508052520;
-    ColorSet { white: false, blue: false, black: true, red: true, green: true } => "in_brg", 493531781799084032;
-    ColorSet { white: true, blue: false, black: false, red: true, green: true } => "in_rgw", 493531781660672005;
-    ColorSet { white: true, blue: false, black: true, red: false, green: true } => "in_wbg", 493531782386548736;
-    ColorSet { white: true, blue: true, black: false, red: true, green: false } => "in_urw", 493531782130696193;
-    ColorSet { white: false, blue: true, black: true, red: false, green: true } => "in_bgu", 493531780666884097;
-    ColorSet { white: true, blue: false, black: true, red: true, green: false } => "in_rwb", 493531782352732160;
-    ColorSet { white: false, blue: true, black: false, red: true, green: true } => "in_gur", 493531781782306863;
-    ColorSet { white: true, blue: true, black: true, red: true, green: false } => "in_wubr", 493536592296673290;
-    ColorSet { white: false, blue: true, black: true, red: true, green: true } => "in_ubrg", 493536591973974046;
-    ColorSet { white: true, blue: false, black: true, red: true, green: true } => "in_brgw", 493536591403286563;
-    ColorSet { white: true, blue: true, black: false, red: true, green: true } => "in_rgwu", 493536591482978315;
-    ColorSet { white: true, blue: true, black: true, red: false, green: true } => "in_gwub", 493536591474589699;
-    ColorSet { white: true, blue: true, black: true, red: true, green: true } => "in_wubrg", 493540446623236096;
+
+trait EmojiCache {
+    fn manamoji(&self, s: &str) -> Option<Emoji>;
+    fn with_manamoji(&self, s: impl ToString) -> String;
+    fn indicator_emoji(&self, colors: &ColorSet) -> Option<Emoji>;
+}
+
+impl<T: AsRef<CacheRwLock>> EmojiCache for T {
+    manamoji! {
+        "{0}" => 386740600436686878;
+        "{1}" => 386740600399069204;
+        "{10}" => 386740603708506142;
+        "{11}" => 386741116927475718;
+        "{12}" => 386741117577592833;
+        "{13}" => 386741118303469570;
+        "{14}" => 386741118668242964;
+        "{15}" => 386741118273847307;
+        "{16}" => 386741118597070850;
+        "{17}" => 386741120434044948;
+        "{18}" => 386741120006094860;
+        "{19}" => 386741120371261449;
+        "{2}" => 386740600755453953;
+        "{2/B}" => 386741115807596547;
+        "{2/G}" => 386741116118106122;
+        "{2/R}" => 386741116222963712;
+        "{2/U}" => 386741115933687809;
+        "{2/W}" => 386741116462039043;
+        "{20}" => 386741120543227906;
+        "{3}" => 386740601082871822;
+        "{4}" => 386740601556828160;
+        "{5}" => 386740601724338176;
+        "{6}" => 386740602265403392;
+        "{7}" => 386740602374717440;
+        "{8}" => 386740602747879435;
+        "{9}" => 386740603494334484;
+        "{A}" => 483811996924379156;
+        "{B}" => 386740604341583873;
+        "{B/G}" => 386740605847470081;
+        "{B/P}" => 386741121486815232;
+        "{B/R}" => 386740607017549838;
+        "{C}" => 386740607416139777;
+        "{CHAOS}" => 386741121608318986;
+        "{DISCOVER}" => 583092272028057601;
+        "{E}" => 386741121780416513;
+        "{G}" => 386740607827181569;
+        "{G/P}" => 386741122225012761;
+        "{G/U}" => 386740607906873344;
+        "{G/W}" => 386740607994953728;
+        "{P}" => 483816536176590898;
+        "{Q}" => 386741125987434506;
+        "{R}" => 386740612394778634;
+        "{R/G}" => 386740613430640640;
+        "{R/P}" => 386741125773262860;
+        "{R/W}" => 386740615498563588;
+        "{S}" => 386741126939541505;
+        "{T}" => 386740612143120385;
+        "{U}" => 386740612289789953;
+        "{U/B}" => 386740615683112992;
+        "{U/P}" => 386741126247350284;
+        "{U/R}" => 386740615649558534;
+        "{W}" => 386740617792978944;
+        "{W/B}" => 386740617780264960;
+        "{W/P}" => 386741126645809162;
+        "{W/U}" => 386740617792978964;
+        "{X}" => 386740617667018752;
+        "{Y}" => 386741126457065473;
+        "{Z}" => 386741127207845890;
+        "{hr}" => 386741125672730634;
+        "{hw}" => 386741125773262848;
+        "{½}" => 386741122510225421;
+        "{∞}" => 386741125861605387;
+    }
+
+    indicator_emoji! {
+        ColorSet { white: false, blue: false, black: false, red: false, green: false } => 493537120628244481;
+        ColorSet { white: true, blue: false, black: false, red: false, green: false } => 493480100252352512;
+        ColorSet { white: false, blue: true, black: false, red: false, green: false } => 493480399532589067;
+        ColorSet { white: false, blue: false, black: true, red: false, green: false } => 493480399146844171;
+        ColorSet { white: false, blue: false, black: false, red: true, green: false } => 493480399545040910;
+        ColorSet { white: false, blue: false, black: false, red: false, green: true } => 493480399737978883;
+        ColorSet { white: true, blue: true, black: false, red: false, green: false } => 493518454775873536;
+        ColorSet { white: false, blue: true, black: true, red: false, green: false } => 493518454033219585;
+        ColorSet { white: false, blue: false, black: true, red: true, green: false } => 493518453249015809;
+        ColorSet { white: false, blue: false, black: false, red: true, green: true } => 493518453886550016;
+        ColorSet { white: true, blue: false, black: false, red: false, green: true } => 493518453919973407;
+        ColorSet { white: true, blue: false, black: true, red: false, green: false } => 493518454108979202;
+        ColorSet { white: false, blue: true, black: false, red: true, green: false } => 493518454268100650;
+        ColorSet { white: false, blue: false, black: true, red: false, green: true } => 493518453123186689;
+        ColorSet { white: true, blue: false, black: false, red: true, green: false } => 493518453999927307;
+        ColorSet { white: false, blue: true, black: false, red: false, green: true } => 493518453249015810;
+        ColorSet { white: true, blue: true, black: false, red: false, green: true } => 493531781744689153;
+        ColorSet { white: true, blue: true, black: true, red: false, green: false } => 493531782210125864;
+        ColorSet { white: false, blue: true, black: true, red: true, green: false } => 493531782508052520;
+        ColorSet { white: false, blue: false, black: true, red: true, green: true } => 493531781799084032;
+        ColorSet { white: true, blue: false, black: false, red: true, green: true } => 493531781660672005;
+        ColorSet { white: true, blue: false, black: true, red: false, green: true } => 493531782386548736;
+        ColorSet { white: true, blue: true, black: false, red: true, green: false } => 493531782130696193;
+        ColorSet { white: false, blue: true, black: true, red: false, green: true } => 493531780666884097;
+        ColorSet { white: true, blue: false, black: true, red: true, green: false } => 493531782352732160;
+        ColorSet { white: false, blue: true, black: false, red: true, green: true } => 493531781782306863;
+        ColorSet { white: true, blue: true, black: true, red: true, green: false } => 493536592296673290;
+        ColorSet { white: false, blue: true, black: true, red: true, green: true } => 493536591973974046;
+        ColorSet { white: true, blue: false, black: true, red: true, green: true } => 493536591403286563;
+        ColorSet { white: true, blue: true, black: false, red: true, green: true } => 493536591482978315;
+        ColorSet { white: true, blue: true, black: true, red: false, green: true } => 493536591474589699;
+        ColorSet { white: true, blue: true, black: true, red: true, green: true } => 493540446623236096;
+    }
 }
 
 const HOSTNAME: &str = "lore-seeker.cards";
@@ -256,10 +273,10 @@ struct Handler(Arc<Mutex<Option<Context>>>);
 impl EventHandler for Handler {
     fn ready(&self, ctx: Context, ready: Ready) {
         *self.0.lock() = Some(ctx.clone());
-        let guilds = ready.user.guilds().expect("failed to get guilds");
+        let guilds = ready.user.guilds(&ctx).expect("failed to get guilds");
         if guilds.is_empty() {
             println!("[!!!!] No guilds found, use following URL to invite the bot:");
-            println!("[ ** ] {}", ready.user.invite_url(Permissions::READ_MESSAGES | Permissions::SEND_MESSAGES | Permissions::USE_EXTERNAL_EMOJIS).expect("failed to generate invite URL"));
+            println!("[ ** ] {}", ready.user.invite_url(&ctx, Permissions::READ_MESSAGES | Permissions::SEND_MESSAGES | Permissions::USE_EXTERNAL_EMOJIS).expect("failed to generate invite URL"));
             shut_down(&ctx);
         }
     }
@@ -268,8 +285,8 @@ impl EventHandler for Handler {
         user_list::remove(guild_id, user).expect("failed to remove banned user from user list");
     }
 
-    fn guild_ban_removal(&self, _: Context, guild_id: GuildId, user: User) {
-        user_list::add(guild_id, guild_id.member(user).expect("failed to get unbanned guild member")).expect("failed to add unbanned user to user list");
+    fn guild_ban_removal(&self, ctx: Context, guild_id: GuildId, user: User) {
+        user_list::add(guild_id, guild_id.member(ctx, user).expect("failed to get unbanned guild member")).expect("failed to add unbanned user to user list");
     }
 
     fn guild_create(&self, _: Context, guild: Guild, _: bool) {
@@ -297,7 +314,7 @@ impl EventHandler for Handler {
 
     fn message(&self, ctx: Context, msg: Message) {
         if msg.author.bot { return; } // ignore bots to prevent message loops
-        if let Some(err_reply) = match handle_message(ctx, &msg) {
+        if let Some(err_reply) = match handle_message(&ctx, &msg) {
             Ok(()) => None,
             Err(Error::DmOnlyCommand) => Some("to avoid spamming channels, this command is only allowed in direct messages".into()),
             Err(Error::MomirMissingCmc) => Some("missing CMC".into()),
@@ -319,13 +336,13 @@ impl EventHandler for Handler {
                 Some("unknown error (cc <@86841168427495424>)".into())
             }
         } {
-            msg.reply(&err_reply).expect("failed to send error reply");
+            msg.reply(ctx, &err_reply).expect("failed to send error reply");
         }
     }
 }
 
 #[derive(Debug)]
-pub enum Error {
+enum Error {
     Db(mtg::card::DbError),
     DmOnlyCommand,
     Env(env::VarError),
@@ -408,14 +425,14 @@ impl From<url::ParseError> for Error {
 }
 
 #[must_use]
-fn card_embed(e: CreateEmbed, card: Card, card_url: &Url) -> CreateEmbed {
+fn card_embed<'a>(ctx: &impl AsRef<CacheRwLock>, e: &'a mut CreateEmbed, card: Card, card_url: &Url) -> &'a mut CreateEmbed {
     e
         .color(match card.rarity().color() {
             (0, 0, 0) => (1, 1, 1), // Discord turns actual black into light gray
             c => c
         })
         .title(if let Some(cost) = card.mana_cost() {
-            format!("{} {}", card, with_manamoji(cost))
+            format!("{} {}", card, ctx.with_manamoji(cost))
         } else {
             card.to_string()
         })
@@ -423,12 +440,17 @@ fn card_embed(e: CreateEmbed, card: Card, card_url: &Url) -> CreateEmbed {
         .description({
             let mut description_builder = MessageBuilder::default();
             if let Some(indicator) = card.color_indicator() {
-                description_builder = description_builder.emoji(&indicator_emoji(&indicator));
+                if let Some(emoji) = ctx.indicator_emoji(&indicator) {
+                    description_builder.emoji(&emoji);
+                } else {
+                    description_builder.push(format!("({}) ", indicator.canonical_order().into_iter().map(|c| c.letter()).collect::<String>()));
+                }
             }
             description_builder
                 .push_bold_safe(&card.type_line())
                 .push("\n\n")
-                .push(with_manamoji(&card.text())) //TODO add support for levelers, fix loyalty costs and quotes, italicize ability words and reminder text
+                .push(ctx.with_manamoji(&card.text())) //TODO add support for levelers, fix loyalty costs and quotes, italicize ability words and reminder text
+                .build()
         })
         .fields(
             (if let Some((pow, tou)) = card.pt() {
@@ -504,11 +526,11 @@ fn get(path: String) -> Result<reqwest::Response, Error> {
     )
 }
 
-fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
-    let current_user_id = serenity::CACHE.read().user.id;
+fn handle_message(ctx: &Context, msg: &Message) -> Result<(), Error> {
+    let current_user_id = AsRef::<CacheRwLock>::as_ref(ctx).read().user.id;
     let is_inline_channel = {
         // guild in inlineGuilds xor channel in inlineChannels
-        let ctx_data = ctx.data.lock();
+        let ctx_data = ctx.data.read();
         let inline_guilds = ctx_data.get::<InlineGuilds>().ok_or(Error::MissingInlineChannels)?;
         msg.guild_id.map_or(false, |guild_id| inline_guilds.contains(&guild_id))
         != ctx_data.get::<InlineChannels>().ok_or(Error::MissingInlineChannels)?.contains(&msg.channel_id)
@@ -529,25 +551,28 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
         if let Some(cmd_name) = eat_word(query) {
             match &cmd_name[..] {
                 "quit" => {
-                    owner_check(&ctx, &msg)?;
-                    shut_down(&ctx);
+                    owner_check(ctx, &msg)?;
+                    shut_down(ctx);
                     return Ok(());
                 }
                 "ping" => {
-                    msg.reply("pong")?;
+                    msg.reply(ctx, "pong")?;
                     return Ok(());
                 }
                 "check" => {
-                    owner_check(&ctx, &msg)?;
+                    owner_check(ctx, &msg)?;
                     if !msg.is_private() {
                         return Err(Error::DmOnlyCommand);
                     }
-                    msg.reply("reloading database…")?;
-                    let mut data = ctx.data.lock();
-                    reload_db(&mut data)?;
-                    msg.reply("done, resolving query…")?;
+                    msg.reply(ctx, "reloading database…")?;
+                    {
+                        let mut data = ctx.data.write();
+                        reload_db(&mut data)?;
+                    }
+                    msg.reply(ctx, "done, resolving query…")?;
                     let (encoded_query, matches) = resolve_query(query)?;
-                    msg.reply(&format!("{} cards found: <https://{}/card?q={}>. Checking cards…", matches.len(), HOSTNAME, encoded_query))?;
+                    msg.reply(ctx, &format!("{} cards found: <https://{}/card?q={}>. Checking cards…", matches.len(), HOSTNAME, encoded_query))?;
+                    let data = ctx.data.read();
                     let db = data.get::<CardDb>().ok_or(Error::MissingCardDb)?;
                     let mut oks = 0;
                     let mut errs = 0;
@@ -555,33 +580,34 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                         let card = match db.card(&card_name) {
                             Some(card) => card,
                             None => {
-                                msg.reply(&format!("Card not found: {}", card_name))?;
+                                msg.reply(ctx, &format!("Card not found: {}", card_name))?;
                                 errs += 1;
                                 continue;
                             }
                         };
+                        let ctx_clone = ctx.clone();
                         let check_thread = thread::Builder::new().name("Lore Seeker card check".into()).spawn(move || {
-                            let _ = card_embed(CreateEmbed::default(), card, &card_url);
+                            let _ = card_embed(&ctx_clone, &mut CreateEmbed::default(), card, &card_url);
                         })?;
                         match check_thread.join() {
                             Ok(()) => { oks += 1; }
                             Err(_) => {
-                                msg.reply(&format!("Error rendering card embed for {}", card_name))?;
+                                msg.reply(ctx, &format!("Error rendering card embed for {}", card_name))?;
                                 errs += 1;
                             }
                         }
                     }
-                    msg.reply(&format!("{} card embeds successfully rendered, {} errors", oks, errs))?;
+                    msg.reply(ctx, &format!("{} card embeds successfully rendered, {} errors", oks, errs))?;
                     return Ok(());
                 }
                 "rand" | "random" => {
-                    return handle_query(&ctx, msg, query, true);
+                    return handle_query(ctx, msg, query, true);
                 }
                 "reload" | "update" => {
-                    owner_check(&ctx, &msg)?;
-                    let mut data = ctx.data.lock();
+                    owner_check(ctx, &msg)?;
+                    let mut data = ctx.data.write();
                     reload_db(&mut data)?;
-                    msg.react("✅")?;
+                    msg.react(ctx, "✅")?;
                     return Ok(());
                 }
                 "booster" | "boosters" | "pack" | "packs" | "sealed" => {
@@ -608,13 +634,13 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                             let card_name = img_elt.attributes.borrow().get("alt").ok_or(Error::MissingTextNode)?.to_string();
                             Ok::<_, Error>((card_name, href))
                         }).collect::<Result<Vec<_>, _>>()?;
-                        msg.channel_id.send_message(|m| {
+                        msg.channel_id.send_message(ctx, |m| {
                             m.embed(|e| e
                                 .title(MessageBuilder::default().push_italic_safe(set_name).push(" booster"))
                                 .description({
                                     let mut builder = MessageBuilder::default();
                                     for (card_name, href) in cards {
-                                        builder = builder.push('[').push_safe(card_name).push_line(format!("]({})", href));
+                                        builder.push('[').push_safe(card_name).push_line(format!("]({})", href));
                                     }
                                     builder
                                 })
@@ -630,7 +656,7 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                         players.push(user_id);
                         eat_whitespace(query);
                     }
-                    return mental_judge_tower(&msg, players, Some(false), query);
+                    return mental_judge_tower(ctx, &msg, players, Some(false), query);
                 }
                 "cmjt" => {
                     // custom Mental Judge Tower, for custom cards
@@ -639,7 +665,7 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                         players.push(user_id);
                         eat_whitespace(query);
                     }
-                    return mental_judge_tower(&msg, players, Some(true), query);
+                    return mental_judge_tower(ctx, &msg, players, Some(true), query);
                 }
                 "fmjt" => {
                     // fusion Mental Judge Tower, for both real and custom cards
@@ -648,25 +674,25 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                         players.push(user_id);
                         eat_whitespace(query);
                     }
-                    return mental_judge_tower(&msg, players, None, query);
+                    return mental_judge_tower(ctx, &msg, players, None, query);
                 }
                 "momir" => {
                     // Momir, for real cards
                     let cmc = eat_word(query).ok_or(Error::MomirMissingCmc)?.parse::<usize>()?;
                     eat_whitespace(query);
-                    return momir(&ctx, msg, cmc, Some(false), query);
+                    return momir(ctx, msg, cmc, Some(false), query);
                 }
                 "cmomir" => {
                     // custom Momir, for custom cards
                     let cmc = eat_word(query).ok_or(Error::MomirMissingCmc)?.parse::<usize>()?;
                     eat_whitespace(query);
-                    return momir(&ctx, msg, cmc, Some(true), query);
+                    return momir(ctx, msg, cmc, Some(true), query);
                 }
                 "fmomir" => {
                     // fusion Momir, for both real and custom cards
                     let cmc = eat_word(query).ok_or(Error::MomirMissingCmc)?.parse::<usize>()?;
                     eat_whitespace(query);
-                    return momir(&ctx, msg, cmc, None, query);
+                    return momir(ctx, msg, cmc, None, query);
                 }
                 cmd => {
                     return Err(Error::UnknownCommand(cmd.into()));
@@ -674,7 +700,7 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
             }
         }
     } else if query.len() > 0 {
-        handle_query(&ctx, msg, query, false)?;
+        handle_query(ctx, msg, query, false)?;
     } else if is_inline_channel {
         let mut remaining_msg = &msg.content[..];
         while let Some(start_idx) = remaining_msg.find("[[") {
@@ -682,17 +708,17 @@ fn handle_message(ctx: Context, msg: &Message) -> Result<(), Error> {
                 let end_idx = start_idx + end_offset;
                 let query = &remaining_msg[start_idx + 2..end_idx];
                 if let Some(card) = {
-                    let ctx_data = ctx.data.lock();
+                    let ctx_data = ctx.data.read();
                     let db = ctx_data.get::<CardDb>().ok_or(Error::MissingCardDb)?;
                     db.card_fuzzy(query)
                 } {
-                    handle_query_result(&ctx, msg,
+                    handle_query_result(ctx, msg,
                         iter::once((card.to_string(), format!("https://{}/card?q=!{}", HOSTNAME, urlencoding::encode(&card.to_string())).parse().expect("failed to generate card URL"))), //TODO use exact printing URL
                         false,
                         format!("!{}", urlencoding::encode(query)) //TODO fix query
                     )?;
                 } else {
-                    handle_query(&ctx, msg, query, false)?;
+                    handle_query(ctx, msg, query, false)?;
                 }
                 remaining_msg = &remaining_msg[end_idx + 2..];
             } else {
@@ -715,15 +741,15 @@ fn handle_query_result(ctx: &Context, msg: &Message, matches: impl IntoIterator<
         if let Some(&(ref card_name, ref card_url)) = matches_vec.choose(&mut thread_rng()) {
             show_single_card(ctx, msg, Some(&format!("{} card{} found, random card", matches_vec.len(), if matches_vec.len() == 1 { "" } else { "s" })), card_name, card_url)?;
         } else {
-            msg.reply("no cards found")?;
+            msg.reply(ctx, "no cards found")?;
         }
     } else {
         match (matches.next(), matches.next()) {
-            (Some(_), Some(_)) => { msg.reply(&format!("{} cards found: <https://{}/card?q={}>", 2 + matches.count(), HOSTNAME, encoded_query))?; }
+            (Some(_), Some(_)) => { msg.reply(ctx, &format!("{} cards found: <https://{}/card?q={}>", 2 + matches.count(), HOSTNAME, encoded_query))?; }
             (Some((card_name, card_url)), None) => {
                 show_single_card(ctx, msg, None, &card_name, &card_url)?;
             }
-            (None, _) => { msg.reply("no cards found")?; }
+            (None, _) => { msg.reply(ctx, "no cards found")?; }
         }
     }
     Ok(())
@@ -745,8 +771,10 @@ fn listen_ipc(ctx_arc: Arc<Mutex<Option<Context>>>) -> Result<(), Error> { //TOD
                 "reload" => {
                     let ctx_guard = ctx_arc.lock();
                     let ctx = ctx_guard.as_ref().ok_or(Error::MissingContext)?;
-                    let mut data = ctx.data.lock();
-                    reload_db(&mut data)?;
+                    {
+                        let mut data = ctx.data.write();
+                        reload_db(&mut data)?;
+                    }
                     writeln!(&mut &stream, "reload complete")?;
                 }
                 s => { return Err(Error::UnknownCommand(s.to_owned())); }
@@ -756,19 +784,19 @@ fn listen_ipc(ctx_arc: Arc<Mutex<Option<Context>>>) -> Result<(), Error> { //TOD
     unreachable!();
 }
 
-fn mental_judge_tower(msg: &Message, mut players: Vec<UserId>, custom: Option<bool>, query: &str) -> Result<(), Error> {
+fn mental_judge_tower(ctx: &Context, msg: &Message, mut players: Vec<UserId>, custom: Option<bool>, query: &str) -> Result<(), Error> {
     let mut builder = MessageBuilder::default();
     let mut gen = thread_rng();
     if !players.is_empty() {
         players.shuffle(&mut gen);
         for (i, player) in players.into_iter().enumerate() {
-            builder = builder
+            builder
                 .push(if i == 0 { "turn order: " } else { ", " })
                 .mention(&player);
         }
-        builder = builder.push("\n");
+        builder.push("\n");
     }
-    builder = builder.push(format!(
+    builder.push(format!(
         "seed: <https://{}/card?q={}+is%3Aprimary+not%3Areprint+sort%3Arand+%28%28-layout%3Asplit+-layout%3Aaftermath%29+or+number%3A%2Fa%2F%29",
         HOSTNAME,
         match custom {
@@ -778,14 +806,14 @@ fn mental_judge_tower(msg: &Message, mut players: Vec<UserId>, custom: Option<bo
         }
     ));
     if !query.is_empty() {
-        builder = builder.push("+").push(urlencoding::encode(query));
+        builder.push("+").push(urlencoding::encode(query));
     }
-    builder = builder.push(format!(
+    builder.push(format!(
         "&random_seed={:08x}{:08x}>",
         gen.gen_range(0, 0x1_0000_0000_u64),
         gen.gen_range(0, 0x1_0000_0000_u64)
     ));
-    msg.reply(&builder.build())?;
+    msg.reply(ctx, &builder.build())?;
     Ok(())
 }
 
@@ -833,7 +861,7 @@ fn notify_ipc_crash(e: Error) {
 }
 
 fn owner_check(ctx: &Context, msg: &Message) -> Result<(), Error> {
-    let data = ctx.data.lock();
+    let data = ctx.data.read();
     let owners = data.get::<Owners>().ok_or(Error::MissingOwners)?;
     if owners.contains(&msg.author.id) {
         Ok(())
@@ -884,10 +912,10 @@ fn send_ipc_command<T: fmt::Display, I: IntoIterator<Item = T>>(cmd: I) -> Resul
 
 fn show_single_card(ctx: &Context, msg: &Message, reply_text: Option<&str>, card_name: &str, card_url: &Url) -> Result<(), Error> {
     let card = {
-        let data = ctx.data.lock();
+        let data = ctx.data.read();
         data.get::<CardDb>().and_then(|db| db.card(card_name))
     };
-    msg.channel_id.send_message(|m| {
+    msg.channel_id.send_message(ctx, |m| {
         let m = match (reply_text, card.is_some()) {
             (None, true) => m,
             (_, _) => {
@@ -896,7 +924,7 @@ fn show_single_card(ctx: &Context, msg: &Message, reply_text: Option<&str>, card
             }
         };
         if let Some(card) = card {
-            m.embed(|e| card_embed(e, card, card_url))
+            m.embed(|e| card_embed(ctx, e, card, card_url))
         } else {
             m
         }
@@ -907,7 +935,7 @@ fn show_single_card(ctx: &Context, msg: &Message, reply_text: Option<&str>, card
 /// Utility function to shut down all shards.
 pub fn shut_down(ctx: &Context) {
     ctx.invisible(); // hack to prevent the bot showing as online when it's not
-    let data = ctx.data.lock();
+    let data = ctx.data.read();
     let mut shard_manager = data.get::<ShardManagerContainer>().expect("missing shard manager").lock();
     shard_manager.shutdown_all();
 }
@@ -923,13 +951,9 @@ fn main() -> Result<(), Error> {
         let handler = Handler::default();
         let ctx_arc = handler.0.clone();
         let mut client = Client::new(&config.bot_token, handler)?;
-        let owners = {
-            let mut owners = HashSet::default();
-            owners.insert(serenity::http::get_current_application_info()?.owner.id);
-            owners
-        };
+        let owners = iter::once(client.cache_and_http.http.get_current_application_info()?.owner.id).collect();
         {
-            let mut data = client.data.lock();
+            let mut data = client.data.write();
             data.insert::<Owners>(owners);
             data.insert::<InlineChannels>(config.inline_channels);
             data.insert::<InlineGuilds>(config.inline_guilds);

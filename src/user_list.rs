@@ -24,7 +24,7 @@ use crate::Error;
 const PROFILES_DIR: &'static str = "/usr/local/share/fenhl/lore-seeker/profiles";
 
 /// Add a Discord account to the given guild's user list.
-pub fn add(guild_id: GuildId, member: Member) -> Result<(), Error> {
+pub(crate) fn add(guild_id: GuildId, member: Member) -> Result<(), Error> {
     let guild_dir = Path::new(PROFILES_DIR).join(guild_id.to_string());
     if !guild_dir.exists() {
         fs::create_dir(&guild_dir)?;
@@ -40,7 +40,7 @@ pub fn add(guild_id: GuildId, member: Member) -> Result<(), Error> {
 }
 
 /// Remove a Discord account from the given guild's user list.
-pub fn remove<U: Into<UserId>>(guild_id: GuildId, user: U) -> io::Result<()> {
+pub(crate) fn remove<U: Into<UserId>>(guild_id: GuildId, user: U) -> io::Result<()> {
     match fs::remove_file(Path::new(PROFILES_DIR).join(guild_id.to_string()).join(format!("{}.json", user.into()))) {
         Err(ref e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
         r => r
@@ -48,7 +48,7 @@ pub fn remove<U: Into<UserId>>(guild_id: GuildId, user: U) -> io::Result<()> {
 }
 
 /// (Re)initialize the given guild's user list.
-pub fn set_guild<I: IntoIterator<Item=Member>>(guild_id: GuildId, members: I) -> Result<(), Error> {
+pub(crate) fn set_guild<I: IntoIterator<Item=Member>>(guild_id: GuildId, members: I) -> Result<(), Error> {
     let guild_dir = Path::new(PROFILES_DIR).join(guild_id.to_string());
     if guild_dir.exists() {
         for entry in fs::read_dir(guild_dir)? {
@@ -62,7 +62,7 @@ pub fn set_guild<I: IntoIterator<Item=Member>>(guild_id: GuildId, members: I) ->
 }
 
 /// Update the data for a guild member. Equivalent to `remove` followed by `add`.
-pub fn update(guild_id: GuildId, member: Member) -> Result<(), Error> {
+pub(crate) fn update(guild_id: GuildId, member: Member) -> Result<(), Error> {
     remove(guild_id, &member)?;
     add(guild_id, member)?;
     Ok(())
