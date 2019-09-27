@@ -605,8 +605,7 @@ fn handle_message(ctx: &Context, msg: &Message) -> Result<(), Error> {
                 }
                 "reload" | "update" => {
                     owner_check(ctx, &msg)?;
-                    let mut data = ctx.data.write();
-                    reload_db(&mut data)?;
+                    reload_all(ctx)?;
                     msg.react(ctx, "✅")?;
                     return Ok(());
                 }
@@ -771,10 +770,7 @@ fn listen_ipc(ctx_arc: Arc<Mutex<Option<Context>>>) -> Result<(), Error> { //TOD
                 "reload" => {
                     let ctx_guard = ctx_arc.lock();
                     let ctx = ctx_guard.as_ref().ok_or(Error::MissingContext)?;
-                    {
-                        let mut data = ctx.data.write();
-                        reload_db(&mut data)?;
-                    }
+                    reload_all(ctx)?;
                     writeln!(&mut &stream, "reload complete")?;
                 }
                 s => { return Err(Error::UnknownCommand(s.to_owned())); }
@@ -870,6 +866,20 @@ fn owner_check(ctx: &Context, msg: &Message) -> Result<(), Error> {
     }
 }
 
+fn reload_all(ctx: &Context) -> Result<(), Error> {
+    let config = serde_json::from_reader::<_, Config>(File::open("/usr/local/share/fenhl/lore-seeker/config.json")?)?;
+    let mut data = ctx.data.write();
+    reload_config(&mut data, config)?;
+    reload_db(&mut data)?;
+    Ok(())
+}
+
+fn reload_config(ctx_data: &mut ShareMap, config: Config) -> Result<(), Error> {
+    ctx_data.insert::<InlineChannels>(config.inline_channels);
+    ctx_data.insert::<InlineGuilds>(config.inline_guilds);
+    Ok(())
+}
+
 fn reload_db(ctx_data: &mut ShareMap) -> Result<(), Error> {
     let db = Db::from_sets_dir("/opt/git/github.com/fenhl/lore-seeker/stage/data/sets")?;
     ctx_data.insert::<CardDb>(db);
@@ -955,9 +965,8 @@ fn main() -> Result<(), Error> {
         {
             let mut data = client.data.write();
             data.insert::<Owners>(owners);
-            data.insert::<InlineChannels>(config.inline_channels);
-            data.insert::<InlineGuilds>(config.inline_guilds);
             data.insert::<ShardManagerContainer>(Arc::clone(&client.shard_manager));
+            reload_config(&mut data, config)?;
             // load cards before going online
             println!("loading cards");
             io::stdout().flush()?;
