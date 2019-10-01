@@ -1,6 +1,4 @@
-#![warn(trivial_casts)]
-#![deny(unused)]
-#![forbid(unused_import_braces)]
+#![deny(rust_2018_idioms, unused, unused_import_braces, unused_qualifications, warnings)]
 
 mod user_list;
 
@@ -41,7 +39,8 @@ use {
     mtg::{
         card::{
             Card,
-            Db
+            Db,
+            Layout
         },
         color::ColorSet
     },
@@ -53,7 +52,10 @@ use {
         client::bridge::gateway::ShardManager,
         model::prelude::*,
         prelude::*,
-        utils::MessageBuilder
+        utils::{
+            EmbedMessageBuilding as _,
+            MessageBuilder
+        }
     },
     typemap::{
         Key,
@@ -228,6 +230,16 @@ impl<T: AsRef<CacheRwLock>> EmojiCache for T {
 const HOSTNAME: &str = "lore-seeker.cards";
 const IPC_ADDR: &str = "127.0.0.1:18806";
 
+trait MessageBuilderExt {
+    fn push_card_link(&mut self, card: &Card) -> &mut Self;
+}
+
+impl MessageBuilderExt for MessageBuilder {
+    fn push_card_link(&mut self, card: &Card) -> &mut Self {
+        self.push_named_link_safe(card, card_name_url(card).expect("failed to generate card URL"))
+    }
+}
+
 struct CardDb;
 
 impl Key for CardDb {
@@ -392,6 +404,56 @@ fn card_embed<'a>(ctx: &impl AsRef<CacheRwLock>, e: &'a mut CreateEmbed, card: C
         .url(card_url)
         .description({
             let mut description_builder = MessageBuilder::default();
+            match card.layout() {
+                Layout::Normal => {}
+                Layout::Split { left, right } => {
+                    description_builder.push(if card.is_alt() { "(Right half of " } else { "(Left half of " })
+                        .push_card_link(&left)
+                        .push(" // ")
+                        .push_card_link(&right)
+                        .push_line(')');
+                }
+                Layout::Flip { unflipped, flipped } => if card.is_alt() {
+                    description_builder.push("(Flipped version of ")
+                        .push_card_link(&unflipped)
+                        .push_line(')');
+                } else {
+                    description_builder.push("(Flips into ")
+                        .push_card_link(&flipped)
+                        .push_line(')');
+                },
+                Layout::DoubleFaced { front, back, .. } => if card.is_alt() {
+                    description_builder.push("(Transforms from ")
+                        .push_card_link(&front)
+                        .push_line(')');
+                } else {
+                    description_builder.push("(Transforms into ")
+                        .push_card_link(&back)
+                        .push_line(')');
+                },
+                Layout::Meld { top, bottom, back } => if card.is_alt() {
+                    description_builder.push("(Melds from ")
+                        .push_card_link(&top)
+                        .push(" and ")
+                        .push_card_link(&bottom)
+                        .push_line(')');
+                } else {
+                    description_builder.push("(Melds starts_with ")
+                        .push_card_link(if card == top { &bottom } else { &top })
+                        .push(" into ")
+                        .push_card_link(&back)
+                        .push_line(')');
+                },
+                Layout::Adventure { creature, adventure } => if card.is_alt() {
+                    description_builder.push("(Adventure of ")
+                        .push_card_link(&creature)
+                        .push_line(')');
+                } else {
+                    description_builder.push("(Has Adventure: ")
+                        .push_card_link(&adventure)
+                        .push_line(')');
+                }
+            }
             if let Some(indicator) = card.color_indicator() {
                 if let Some(emoji) = ctx.indicator_emoji(&indicator) {
                     description_builder.emoji(&emoji);
@@ -431,6 +493,10 @@ fn card_embed<'a>(ctx: &impl AsRef<CacheRwLock>, e: &'a mut CreateEmbed, card: C
                     .join(", ")
             }
         ))
+}
+
+fn card_name_url(card: &Card) -> Result<Url, url::ParseError> {
+    format!("https://{}/card?q=!{}", HOSTNAME, urlencoding::encode(&card.to_string())).parse()
 }
 
 fn eat_user_mention(subj: &mut &str) -> Option<UserId> {
@@ -665,7 +731,7 @@ fn handle_message(ctx: &Context, msg: &Message) -> Result<(), Error> {
                     db.card_fuzzy(query)
                 } {
                     handle_query_result(ctx, msg,
-                        iter::once((card.to_string(), format!("https://{}/card?q=!{}", HOSTNAME, urlencoding::encode(&card.to_string())).parse().expect("failed to generate card URL"))), //TODO use exact printing URL
+                        iter::once((card.to_string(), card_name_url(&card).expect("failed to generate card URL"))), //TODO use exact printing URL
                         false,
                         format!("!{}", urlencoding::encode(query)) //TODO fix query
                     )?;
