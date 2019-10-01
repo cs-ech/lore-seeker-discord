@@ -438,7 +438,7 @@ fn card_embed<'a>(ctx: &impl AsRef<CacheRwLock>, e: &'a mut CreateEmbed, card: C
                         .push_card_link(&bottom)
                         .push_line(')');
                 } else {
-                    description_builder.push("(Melds starts_with ")
+                    description_builder.push("(Melds with ")
                         .push_card_link(if card == top { &bottom } else { &top })
                         .push(" into ")
                         .push_card_link(&back)
