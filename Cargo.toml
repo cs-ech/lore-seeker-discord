@@ -11,6 +11,7 @@ test = false
 bench = false
 
 [dependencies]
+derive_more = "*"
 kuchiki = "*"
 rand = "*"
 reqwest = "*"

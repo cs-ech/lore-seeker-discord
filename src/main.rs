@@ -36,6 +36,7 @@ use {
         thread,
         time::Duration
     },
+    derive_more::From,
     kuchiki::traits::TendrilSink,
     mtg::{
         card::{
@@ -341,7 +342,7 @@ impl EventHandler for Handler {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, From)]
 enum Error {
     Db(mtg::card::DbError),
     DmOnlyCommand,
@@ -373,54 +374,6 @@ enum Error {
 impl<'a> From<PoisonError<RwLockReadGuard<'a, serenity::cache::Cache>>> for Error {
     fn from(_: PoisonError<RwLockReadGuard<'a, serenity::cache::Cache>>) -> Error {
         Error::Poison
-    }
-}
-
-impl From<std::num::ParseIntError> for Error {
-    fn from(e: std::num::ParseIntError) -> Error {
-        Error::ParseInt(e)
-    }
-}
-
-impl From<env::VarError> for Error {
-    fn from(e: env::VarError) -> Error {
-        Error::Env(e)
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(e: io::Error) -> Error {
-        Error::Io(e)
-    }
-}
-
-impl From<mtg::card::DbError> for Error {
-    fn from(e: mtg::card::DbError) -> Error {
-        Error::Db(e)
-    }
-}
-
-impl From<reqwest::Error> for Error {
-    fn from(e: reqwest::Error) -> Error {
-        Error::Reqwest(e)
-    }
-}
-
-impl From<serde_json::Error> for Error {
-    fn from(e: serde_json::Error) -> Error {
-        Error::Json(e)
-    }
-}
-
-impl From<serenity::Error> for Error {
-    fn from(e: serenity::Error) -> Error {
-        Error::Serenity(e)
-    }
-}
-
-impl From<url::ParseError> for Error {
-    fn from(e: url::ParseError) -> Error {
-        Error::UrlParse(e)
     }
 }
 
