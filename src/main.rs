@@ -545,6 +545,29 @@ fn get(path: String) -> Result<reqwest::Response, Error> {
     )
 }
 
+fn handle_ipc_client(ctx_arc: &Mutex<Option<Context>>, stream: TcpStream) -> Result<(), Error> {
+    for line in BufReader::new(&stream).lines() {
+        let args = shlex::split(&line?).ok_or(Error::Shlex)?;
+        match &args[0][..] {
+            "quit" => {
+                let ctx_guard = ctx_arc.lock();
+                let ctx = ctx_guard.as_ref().ok_or(Error::MissingContext)?;
+                shut_down(&ctx);
+                thread::sleep(Duration::from_secs(1)); // wait to make sure websockets can be closed cleanly
+                writeln!(&mut &stream, "shutdown complete")?;
+            }
+            "reload" => {
+                let ctx_guard = ctx_arc.lock();
+                let ctx = ctx_guard.as_ref().ok_or(Error::MissingContext)?;
+                reload_all(ctx)?;
+                writeln!(&mut &stream, "reload complete")?;
+            }
+            s => { return Err(Error::UnknownCommand(s.to_owned())); }
+        }
+    }
+    Ok(())
+}
+
 fn handle_message(ctx: &Context, msg: &Message) -> Result<(), Error> {
     let current_user_id = AsRef::<CacheRwLock>::as_ref(ctx).read().user.id;
     let is_inline_channel = {
@@ -775,25 +798,8 @@ fn handle_query_result(ctx: &Context, msg: &Message, matches: impl IntoIterator<
 
 fn listen_ipc(ctx_arc: Arc<Mutex<Option<Context>>>) -> Result<(), Error> { //TODO change return type to Result<!, Error>
     for stream in TcpListener::bind(IPC_ADDR)?.incoming() {
-        let stream = stream?;
-        for line in BufReader::new(&stream).lines() {
-            let args = shlex::split(&line?).ok_or(Error::Shlex)?;
-            match &args[0][..] {
-                "quit" => {
-                    let ctx_guard = ctx_arc.lock();
-                    let ctx = ctx_guard.as_ref().ok_or(Error::MissingContext)?;
-                    shut_down(&ctx);
-                    thread::sleep(Duration::from_secs(1)); // wait to make sure websockets can be closed cleanly
-                    writeln!(&mut &stream, "shutdown complete")?;
-                }
-                "reload" => {
-                    let ctx_guard = ctx_arc.lock();
-                    let ctx = ctx_guard.as_ref().ok_or(Error::MissingContext)?;
-                    reload_all(ctx)?;
-                    writeln!(&mut &stream, "reload complete")?;
-                }
-                s => { return Err(Error::UnknownCommand(s.to_owned())); }
-            }
+        if let Err(e) = stream.map_err(Error::from).and_then(|stream| handle_ipc_client(&ctx_arc, stream)) {
+            notify_ipc_crash(e);
         }
     }
     unreachable!();
@@ -930,7 +936,13 @@ fn resolve_query(query: &str) -> Result<(String, Vec<(String, Url)>), Error> {
     Ok((encoded_query, matches))
 }
 
-fn send_ipc_command<T: fmt::Display, I: IntoIterator<Item = T>>(cmd: I) -> Result<String, Error> {
+fn send_ipc_command_no_wait<T: fmt::Display, I: IntoIterator<Item = T>>(cmd: I) -> Result<(), Error> {
+    let mut stream = TcpStream::connect(IPC_ADDR)?;
+    writeln!(&mut stream, "{}", cmd.into_iter().map(|arg| shlex::quote(&arg.to_string()).into_owned()).collect::<Vec<_>>().join(" "))?;
+    Ok(())
+}
+
+fn send_ipc_command_wait<T: fmt::Display, I: IntoIterator<Item = T>>(cmd: I) -> Result<String, Error> {
     let mut stream = TcpStream::connect(IPC_ADDR)?;
     writeln!(&mut stream, "{}", cmd.into_iter().map(|arg| shlex::quote(&arg.to_string()).into_owned()).collect::<Vec<_>>().join(" "))?;
     let mut buf = String::default();
@@ -972,8 +984,13 @@ pub fn shut_down(ctx: &Context) {
 fn main() -> Result<(), Error> {
     let mut args = env::args().peekable();
     let _ = args.next(); // ignore executable name
-    if args.peek().is_some() {
-        println!("{}", send_ipc_command(args)?);
+    if let Some(subcmd) = args.peek() {
+        if subcmd == "--no-wait" {
+            let _ = args.next(); // eat `--no-wait` arg
+            send_ipc_command_no_wait(args)?;
+        } else {
+            println!("{}", send_ipc_command_wait(args)?);
+        }
     } else {
         // read config
         let config = serde_json::from_reader::<_, Config>(File::open("/usr/local/share/fenhl/lore-seeker/config.json")?)?;
