@@ -4,6 +4,14 @@ version = "0.1.0"
 authors = ["Fenhl <fenhl@fenhl.net>"]
 edition = "2018"
 
+[features]
+default = ["local"]
+local = [] # send requests to localhost:18803 instead of lore-seeker.cards
+
+[lib]
+name = "lore_seeker"
+path = "src/lib.rs"
+
 [[bin]]
 name = "lore-seeker"
 path = "src/main.rs"
@@ -11,19 +19,18 @@ test = false
 bench = false
 
 [dependencies]
-derive_more = "*"
-kuchiki = "*"
-rand = "*"
-reqwest = "*"
+derive_more = "0"
+kuchiki = "0"
+rand = "0"
+reqwest = "0"
 serde = "1"
-serde_derive = "1"
 serde_json = "1"
-serenity = "*"
-shlex = "*"
-typemap = "*"
-url = "1"
-urlencoding = "*"
-whoami = "*"
+serenity = "0"
+shlex = "0"
+typemap = "0"
+url = "2"
+urlencoding = "1"
+whoami = "0"
 
 [dependencies.mtg]
 git = "https://github.com/fenhl/rust-mtg"

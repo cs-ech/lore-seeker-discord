@@ -26,16 +26,11 @@ use {
             Stdio
         },
         str::FromStr,
-        sync::{
-            Arc,
-            PoisonError,
-            RwLockReadGuard
-        },
+        sync::Arc,
         thread,
         time::Duration
     },
-    derive_more::From,
-    kuchiki::traits::TendrilSink,
+    kuchiki::traits::TendrilSink as _,
     mtg::{
         card::{
             Card,
@@ -45,7 +40,7 @@ use {
         color::ColorSet
     },
     rand::prelude::*,
-    serde_derive::Deserialize,
+    serde::Deserialize,
     serenity::{
         builder::CreateEmbed,
         cache::CacheRwLock,
@@ -61,7 +56,8 @@ use {
         Key,
         ShareMap
     },
-    url::Url
+    url::Url,
+    lore_seeker::*
 };
 
 macro_rules! manamoji {
@@ -227,7 +223,6 @@ impl<T: AsRef<CacheRwLock>> EmojiCache for T {
     }
 }
 
-const HOSTNAME: &str = "lore-seeker.cards";
 const IPC_ADDR: &str = "127.0.0.1:18806";
 
 trait MessageBuilderExt {
@@ -351,41 +346,6 @@ impl EventHandler for Handler {
         } {
             msg.reply(ctx, &err_reply).expect("failed to send error reply");
         }
-    }
-}
-
-#[derive(Debug, From)]
-enum Error {
-    Db(mtg::card::DbError),
-    DmOnlyCommand,
-    Env(env::VarError),
-    Io(io::Error),
-    Json(serde_json::Error),
-    MissingANode,
-    MissingCardDb,
-    MissingCardLink,
-    MissingCardList,
-    MissingContext,
-    MissingHref,
-    MissingInlineChannels,
-    MissingNewline,
-    MissingOwners,
-    MissingTextNode,
-    MomirMissingCmc,
-    NoSuchCard(String),
-    OwnerCheck,
-    ParseInt(std::num::ParseIntError),
-    Poison,
-    Reqwest(reqwest::Error),
-    Serenity(serenity::Error),
-    Shlex,
-    UnknownCommand(String),
-    UrlParse(url::ParseError)
-}
-
-impl<'a> From<PoisonError<RwLockReadGuard<'a, serenity::cache::Cache>>> for Error {
-    fn from(_: PoisonError<RwLockReadGuard<'a, serenity::cache::Cache>>) -> Error {
-        Error::Poison
     }
 }
 
@@ -532,17 +492,6 @@ fn eat_word(subj: &mut &str) -> Option<String> {
     } else {
         None
     }
-}
-
-fn get(path: String) -> Result<reqwest::Response, Error> {
-    Ok(
-        reqwest::ClientBuilder::new()
-            .timeout(Some(Duration::from_secs(60))) // increased timeout due to performance issues in %sealed
-            .build()?
-            .get(&format!("http://localhost:18803{}", path))
-            .send()?
-            .error_for_status()?
-    )
 }
 
 fn handle_ipc_client(ctx_arc: &Mutex<Option<Context>>, stream: TcpStream) -> Result<(), Error> {
@@ -906,34 +855,9 @@ fn reload_config(ctx_data: &mut ShareMap, config: Config) -> Result<(), Error> {
 }
 
 fn reload_db(ctx_data: &mut ShareMap) -> Result<(), Error> {
-    let db = Db::from_sets_dir("/opt/git/github.com/fenhl/lore-seeker/stage/data/sets")?;
+    let db = Db::from_sets_dir("/opt/git/github.com/fenhl/lore-seeker/stage/data/sets", true)?;
     ctx_data.insert::<CardDb>(db);
     Ok(())
-}
-
-fn resolve_query(query: &str) -> Result<(String, Vec<(String, Url)>), Error> {
-    let encoded_query = urlencoding::encode(if query.is_empty() { "*" } else { query });
-    let document = {
-        let mut response = get(format!("/list?q={}", encoded_query))?;
-        let mut response_content = String::default();
-        response.read_to_string(&mut response_content)?;
-        kuchiki::parse_html().one(response_content)
-    };
-    let card_list_data = document.select_first("ul#search-result").map_err(|()| Error::MissingCardList)?;
-    let card_list = card_list_data.as_node();
-    let mut matches = Vec::default();
-    let base_url = Url::parse(&format!("https://{}/", HOSTNAME))?;
-    for li_node_data in card_list.select("li").map_err(|()| Error::MissingCardList)? {
-        let li_node = li_node_data.as_node();
-        let a_node_data = li_node.select_first("a").map_err(|()| Error::MissingCardLink)?;
-        let a_node = a_node_data.as_node();
-        let a_elt = a_node.as_element().ok_or(Error::MissingANode)?;
-        let text_node = a_node.first_child().ok_or(Error::MissingTextNode)?;
-        let href = a_elt.attributes.borrow().get("href").ok_or(Error::MissingHref).and_then(|href| base_url.join(href).map_err(Error::from))?;
-        let text = text_node.as_text().ok_or(Error::MissingTextNode)?;
-        matches.push((text.borrow().trim().to_owned(), href));
-    }
-    Ok((encoded_query, matches))
 }
 
 fn send_ipc_command_no_wait<T: fmt::Display, I: IntoIterator<Item = T>>(cmd: I) -> Result<(), Error> {
@@ -1006,7 +930,7 @@ fn main() -> Result<(), Error> {
             // load cards before going online
             println!("loading cards");
             io::stdout().flush()?;
-            let db = Db::from_sets_dir("/opt/git/github.com/fenhl/lore-seeker/stage/data/sets")?;
+            let db = Db::from_sets_dir("/opt/git/github.com/fenhl/lore-seeker/stage/data/sets", true)?;
             assert!(db.card("Dryad Arbor").ok_or(Error::NoSuchCard("Dryad Arbor".to_owned()))?.loyalty().is_none());
             let num_cards = db.into_iter().count();
             data.insert::<CardDb>(db);
