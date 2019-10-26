@@ -550,6 +550,9 @@ fn handle_message(ctx: &Context, msg: &Message) -> Result<(), Error> {
                     msg.reply(ctx, "pong")?;
                     return Ok(());
                 }
+                "help" => {
+                    msg.reply(ctx, "See <https://github.com/fenhl/lore-seeker-discord/wiki> for my documentation, including a list of commands.")?;
+                }
                 "check" => {
                     owner_check(ctx, &msg)?;
                     if !msg.is_private() {
