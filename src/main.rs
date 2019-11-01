@@ -505,6 +505,7 @@ fn handle_ipc_client(ctx_arc: &Mutex<Option<Context>>, stream: TcpStream) -> Res
                 for card_name in &args[1..] {
                     show_single_card(&ctx, EXH_CARDS_CHANNEL, None, card_name, &card_name_url(card_name)?)?;
                 }
+                writeln!(&mut &stream, "card(s) announced")?;
             }
             "quit" => {
                 let ctx_guard = ctx_arc.lock();
