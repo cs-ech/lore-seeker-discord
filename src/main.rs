@@ -223,6 +223,7 @@ impl<T: AsRef<CacheRwLock>> EmojiCache for T {
     }
 }
 
+const EXH_CARDS_CHANNEL: ChannelId = ChannelId(639419990843326464);
 const IPC_ADDR: &str = "127.0.0.1:18806";
 
 trait MessageBuilderExt {
@@ -455,7 +456,7 @@ fn card_embed<'a>(ctx: &impl AsRef<CacheRwLock>, e: &'a mut CreateEmbed, card: C
         ))
 }
 
-fn card_name_url(card: &Card) -> Result<Url, url::ParseError> {
+fn card_name_url(card: impl ToString) -> Result<Url, url::ParseError> {
     format!("https://{}/card?q=!{}", HOSTNAME, urlencoding::encode(&card.to_string())).parse()
 }
 
@@ -498,6 +499,13 @@ fn handle_ipc_client(ctx_arc: &Mutex<Option<Context>>, stream: TcpStream) -> Res
     for line in BufReader::new(&stream).lines() {
         let args = shlex::split(&line?).ok_or(Error::Shlex)?;
         match &args[0][..] {
+            "announce-exh-cards" => {
+                let ctx_guard = ctx_arc.lock();
+                let ctx = ctx_guard.as_ref().ok_or(Error::MissingContext)?;
+                for card_name in &args[1..] {
+                    show_single_card(&ctx, EXH_CARDS_CHANNEL, None, card_name, &card_name_url(card_name)?)?;
+                }
+            }
             "quit" => {
                 let ctx_guard = ctx_arc.lock();
                 let ctx = ctx_guard.as_ref().ok_or(Error::MissingContext)?;
@@ -732,7 +740,7 @@ fn handle_query_result(ctx: &Context, msg: &Message, matches: impl IntoIterator<
     if random {
         let matches_vec = matches.collect::<Vec<_>>();
         if let Some(&(ref card_name, ref card_url)) = matches_vec.choose(&mut thread_rng()) {
-            show_single_card(ctx, msg, Some(&format!("{} card{} found, random card", matches_vec.len(), if matches_vec.len() == 1 { "" } else { "s" })), card_name, card_url)?;
+            show_single_card(ctx, msg.channel_id, Some((&msg, Some(&format!("{} card{} found, random card", matches_vec.len(), if matches_vec.len() == 1 { "" } else { "s" })))), card_name, card_url)?;
         } else {
             msg.reply(ctx, "no cards found")?;
         }
@@ -740,7 +748,7 @@ fn handle_query_result(ctx: &Context, msg: &Message, matches: impl IntoIterator<
         match (matches.next(), matches.next()) {
             (Some(_), Some(_)) => { msg.reply(ctx, &format!("{} cards found: <https://{}/card?q={}>", 2 + matches.count(), HOSTNAME, encoded_query))?; }
             (Some((card_name, card_url)), None) => {
-                show_single_card(ctx, msg, None, &card_name, &card_url)?;
+                show_single_card(ctx, msg.channel_id, Some((&msg, None)), &card_name, &card_url)?;
             }
             (None, _) => { msg.reply(ctx, "no cards found")?; }
         }
@@ -878,18 +886,16 @@ fn send_ipc_command_wait<T: fmt::Display, I: IntoIterator<Item = T>>(cmd: I) -> 
     Ok(buf)
 }
 
-fn show_single_card(ctx: &Context, msg: &Message, reply_text: Option<&str>, card_name: &str, card_url: &Url) -> Result<(), Error> {
+fn show_single_card(ctx: &Context, channel_id: ChannelId, reply: Option<(&Message, Option<&str>)>, card_name: &str, card_url: &Url) -> Result<(), Error> {
     let card = {
         let data = ctx.data.read();
         data.get::<CardDb>().and_then(|db| db.card(card_name))
     };
-    msg.channel_id.send_message(ctx, |m| {
-        let m = match (reply_text, card.is_some()) {
-            (None, true) => m,
-            (_, _) => {
-                let reply_text = reply_text.unwrap_or("1 card found");
-                m.content(MessageBuilder::default().mention(&msg.author).push(format!(": {}: <{}>", reply_text, card_url)))
-            }
+    channel_id.send_message(ctx, |m| {
+        let m = match (reply, card.is_some()) {
+            (None, true) | (Some((_, None)), _) => m, // card can be rendered and no explicit reply text exists, so just send the render
+            (None, false) => m.content(format!("1 card found: <{}>", card_url)),
+            (Some((msg, Some(reply_text))), _) => m.content(MessageBuilder::default().mention(&msg.author).push(format!(": {}: <{}>", reply_text, card_url)))
         };
         if let Some(card) = card {
             m.embed(|e| card_embed(ctx, e, card, card_url))
