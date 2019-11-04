@@ -825,7 +825,7 @@ fn next_word(subj: &str) -> Option<String> {
 
 fn notify_ipc_crash(e: Error) {
     let mut child = Command::new("ssmtp")
-        .arg("fenhl@wurstmineberg.de")
+        .arg("fenhl@fenhl.net")
         .stdin(Stdio::piped())
         .spawn()
         .expect("failed to spawn ssmtp");
