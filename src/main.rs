@@ -12,7 +12,6 @@ use {
         fmt,
         fs::File,
         io::{
-            self,
             BufReader,
             prelude::*
         },
@@ -223,6 +222,7 @@ impl<T: AsRef<CacheRwLock>> EmojiCache for T {
     }
 }
 
+const CONFIG_PATH: &str = "/usr/local/share/fenhl/lore-seeker/config.json";
 const EXH_CARDS_CHANNEL: ChannelId = ChannelId(639419990843326464);
 const IPC_ADDR: &str = "127.0.0.1:18806";
 
@@ -497,7 +497,7 @@ fn eat_word(subj: &mut &str) -> Option<String> {
 
 fn handle_ipc_client(ctx_arc: &Mutex<Option<Context>>, stream: TcpStream) -> Result<(), Error> {
     for line in BufReader::new(&stream).lines() {
-        let args = shlex::split(&line?).ok_or(Error::Shlex)?;
+        let args = shlex::split(&line.annotate("IPC client line")?).ok_or(Error::Shlex)?;
         match &args[0][..] {
             "announce-exh-cards" => {
                 let ctx_guard = ctx_arc.lock();
@@ -505,20 +505,20 @@ fn handle_ipc_client(ctx_arc: &Mutex<Option<Context>>, stream: TcpStream) -> Res
                 for card_name in &args[1..] {
                     show_single_card(&ctx, EXH_CARDS_CHANNEL, None, card_name, &card_name_url(card_name)?)?;
                 }
-                writeln!(&mut &stream, "card(s) announced")?;
+                writeln!(&mut &stream, "card(s) announced").annotate("announce-exh-cards IPC reply")?;
             }
             "quit" => {
                 let ctx_guard = ctx_arc.lock();
                 let ctx = ctx_guard.as_ref().ok_or(Error::MissingContext)?;
                 shut_down(&ctx);
                 thread::sleep(Duration::from_secs(1)); // wait to make sure websockets can be closed cleanly
-                writeln!(&mut &stream, "shutdown complete")?;
+                writeln!(&mut &stream, "shutdown complete").annotate("quit IPC reply")?;
             }
             "reload" => {
                 let ctx_guard = ctx_arc.lock();
                 let ctx = ctx_guard.as_ref().ok_or(Error::MissingContext)?;
                 reload_all(ctx)?;
-                writeln!(&mut &stream, "reload complete")?;
+                writeln!(&mut &stream, "reload complete").annotate("reload IPC reply")?;
             }
             s => { return Err(Error::UnknownCommand(s.to_owned())); }
         }
@@ -591,7 +591,7 @@ fn handle_message(ctx: &Context, msg: &Message) -> Result<(), Error> {
                         let ctx_clone = ctx.clone();
                         let check_thread = thread::Builder::new().name("Lore Seeker card check".into()).spawn(move || {
                             let _ = card_embed(&ctx_clone, &mut CreateEmbed::default(), card, &card_url);
-                        })?;
+                        }).annotate("spawn card check thread")?;
                         match check_thread.join() {
                             Ok(()) => { oks += 1; }
                             Err(_) => {
@@ -618,7 +618,7 @@ fn handle_message(ctx: &Context, msg: &Message) -> Result<(), Error> {
                         let document = {
                             let mut response = get(format!("/sealed?count[]=1&set[]={}", lower_code))?;
                             let mut response_content = String::default();
-                            response.read_to_string(&mut response_content)?;
+                            response.read_to_string(&mut response_content).annotate("sealed response")?;
                             kuchiki::parse_html().one(response_content)
                         };
                         let base_url = Url::parse(&format!("https://{}/", HOSTNAME))?;
@@ -758,8 +758,8 @@ fn handle_query_result(ctx: &Context, msg: &Message, matches: impl IntoIterator<
 }
 
 fn listen_ipc(ctx_arc: Arc<Mutex<Option<Context>>>) -> Result<(), Error> { //TODO change return type to Result<!, Error>
-    for stream in TcpListener::bind(IPC_ADDR)?.incoming() {
-        if let Err(e) = stream.map_err(Error::from).and_then(|stream| handle_ipc_client(&ctx_arc, stream)) {
+    for stream in TcpListener::bind(IPC_ADDR).annotate("IPC listener")?.incoming() {
+        if let Err(e) = stream.map_err(|e| e.annotate("incoming stream")).and_then(|stream| handle_ipc_client(&ctx_arc, stream)) {
             notify_ipc_crash(e);
         }
     }
@@ -853,7 +853,7 @@ fn owner_check(ctx: &Context, msg: &Message) -> Result<(), Error> {
 }
 
 fn reload_all(ctx: &Context) -> Result<(), Error> {
-    let config = serde_json::from_reader::<_, Config>(File::open("/usr/local/share/fenhl/lore-seeker/config.json")?)?;
+    let config = serde_json::from_reader::<_, Config>(File::open(CONFIG_PATH).at(CONFIG_PATH)?)?;
     let mut data = ctx.data.write();
     reload_config(&mut data, config)?;
     reload_db(&mut data)?;
@@ -873,16 +873,16 @@ fn reload_db(ctx_data: &mut ShareMap) -> Result<(), Error> {
 }
 
 fn send_ipc_command_no_wait<T: fmt::Display, I: IntoIterator<Item = T>>(cmd: I) -> Result<(), Error> {
-    let mut stream = TcpStream::connect(IPC_ADDR)?;
-    writeln!(&mut stream, "{}", cmd.into_iter().map(|arg| shlex::quote(&arg.to_string()).into_owned()).collect::<Vec<_>>().join(" "))?;
+    let mut stream = TcpStream::connect(IPC_ADDR).annotate("send_ipc_command_no_wait connect")?;
+    writeln!(&mut stream, "{}", cmd.into_iter().map(|arg| shlex::quote(&arg.to_string()).into_owned()).collect::<Vec<_>>().join(" ")).annotate("send_ipc_command_no_wait write")?;
     Ok(())
 }
 
 fn send_ipc_command_wait<T: fmt::Display, I: IntoIterator<Item = T>>(cmd: I) -> Result<String, Error> {
-    let mut stream = TcpStream::connect(IPC_ADDR)?;
-    writeln!(&mut stream, "{}", cmd.into_iter().map(|arg| shlex::quote(&arg.to_string()).into_owned()).collect::<Vec<_>>().join(" "))?;
+    let mut stream = TcpStream::connect(IPC_ADDR).annotate("send_ipc_command_wait connect")?;
+    writeln!(&mut stream, "{}", cmd.into_iter().map(|arg| shlex::quote(&arg.to_string()).into_owned()).collect::<Vec<_>>().join(" ")).annotate("send_ipc_command_wait write")?;
     let mut buf = String::default();
-    BufReader::new(stream).read_line(&mut buf)?;
+    BufReader::new(stream).read_line(&mut buf).annotate("send_ipc_command_wait read")?;
     if buf.pop() != Some('\n') { return Err(Error::MissingNewline) }
     Ok(buf)
 }
@@ -927,7 +927,7 @@ fn main() -> Result<(), Error> {
         }
     } else {
         // read config
-        let config = serde_json::from_reader::<_, Config>(File::open("/usr/local/share/fenhl/lore-seeker/config.json")?)?;
+        let config = serde_json::from_reader::<_, Config>(File::open(CONFIG_PATH).at(CONFIG_PATH)?)?;
         let handler = Handler::default();
         let ctx_arc = handler.0.clone();
         let mut client = Client::new(&config.bot_token, handler)?;
@@ -939,7 +939,6 @@ fn main() -> Result<(), Error> {
             reload_config(&mut data, config)?;
             // load cards before going online
             println!("loading cards");
-            io::stdout().flush()?;
             let db = Db::from_sets_dir("/opt/git/github.com/fenhl/lore-seeker/stage/data/sets", true)?;
             assert!(db.card("Dryad Arbor").ok_or(Error::NoSuchCard("Dryad Arbor".to_owned()))?.loyalty().is_none());
             let num_cards = db.into_iter().count();
@@ -953,7 +952,7 @@ fn main() -> Result<(), Error> {
                     eprintln!("{:?}", e);
                     notify_ipc_crash(e);
                 }
-            })?;
+            }).annotate("spawn IPC connection thread")?;
         }
         // connect to Discord
         client.start_autosharded()?;

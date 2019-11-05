@@ -1,25 +1,31 @@
 //! Helper functions for maintaining a list of known Discord users on disk, which is used by the website to display usernames.
 
-use std::{
-    fs::{
-        self,
-        File
+use {
+    std::{
+        fs::{
+            self,
+            File
+        },
+        io::{
+            self,
+            prelude::*
+        },
+        path::Path
     },
-    io::{
-        self,
-        prelude::*
+    serde_json::json,
+    serenity::model::{
+        guild::Member,
+        id::{
+            GuildId,
+            UserId
+        }
     },
-    path::Path
-};
-use serde_json::json;
-use serenity::model::{
-    guild::Member,
-    id::{
-        GuildId,
-        UserId
+    crate::{
+        Error,
+        IntoResultExt as _,
+        IoResultExt as _
     }
 };
-use crate::Error;
 
 const PROFILES_DIR: &'static str = "/usr/local/share/fenhl/lore-seeker/profiles";
 
@@ -27,15 +33,16 @@ const PROFILES_DIR: &'static str = "/usr/local/share/fenhl/lore-seeker/profiles"
 pub(crate) fn add(guild_id: GuildId, member: Member) -> Result<(), Error> {
     let guild_dir = Path::new(PROFILES_DIR).join(guild_id.to_string());
     if !guild_dir.exists() {
-        fs::create_dir(&guild_dir)?;
+        fs::create_dir(&guild_dir).at(&guild_dir)?;
     }
     let user = member.user.read().clone();
-    let mut f = File::create(guild_dir.join(format!("{}.json", user.id)))?;
+    let path = guild_dir.join(format!("{}.json", user.id));
+    let mut f = File::create(&path).at(&path)?;
     write!(f, "{:#}", json!({
         "discriminator": user.discriminator,
         "snowflake": user.id,
         "username": user.name
-    }))?;
+    })).at(path)?;
     Ok(())
 }
 
@@ -51,8 +58,9 @@ pub(crate) fn remove<U: Into<UserId>>(guild_id: GuildId, user: U) -> io::Result<
 pub(crate) fn set_guild<I: IntoIterator<Item=Member>>(guild_id: GuildId, members: I) -> Result<(), Error> {
     let guild_dir = Path::new(PROFILES_DIR).join(guild_id.to_string());
     if guild_dir.exists() {
-        for entry in fs::read_dir(guild_dir)? {
-            fs::remove_file(entry?.path())?;
+        for entry in fs::read_dir(&guild_dir).at(&guild_dir)? {
+            let path = entry.at(&guild_dir)?.path();
+            fs::remove_file(&path).at(path)?;
         }
     }
     for member in members.into_iter() {
@@ -63,7 +71,7 @@ pub(crate) fn set_guild<I: IntoIterator<Item=Member>>(guild_id: GuildId, members
 
 /// Update the data for a guild member. Equivalent to `remove` followed by `add`.
 pub(crate) fn update(guild_id: GuildId, member: Member) -> Result<(), Error> {
-    remove(guild_id, &member)?;
+    remove(guild_id, &member).annotate("user_list::update")?;
     add(guild_id, member)?;
     Ok(())
 }

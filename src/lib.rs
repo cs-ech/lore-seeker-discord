@@ -7,6 +7,7 @@ use {
             self,
             prelude::*
         },
+        path::PathBuf,
         sync::{
             PoisonError,
             RwLockReadGuard
@@ -22,10 +23,11 @@ pub const HOSTNAME: &str = "lore-seeker.cards";
 
 #[derive(Debug, From)]
 pub enum Error {
+    Annotated(String, Box<Error>),
     Db(mtg::card::DbError),
     DmOnlyCommand,
     Env(env::VarError),
-    Io(io::Error),
+    Io(io::Error, Option<PathBuf>),
     Json(serde_json::Error),
     MissingANode,
     MissingCardDb,
@@ -55,6 +57,68 @@ impl<'a> From<PoisonError<RwLockReadGuard<'a, serenity::cache::Cache>>> for Erro
     }
 }
 
+pub trait IntoResultExt {
+    type T;
+
+    fn annotate(self, note: impl ToString) -> Self::T;
+}
+
+impl<E: Into<Error>> IntoResultExt for E {
+    type T = Error;
+
+    fn annotate(self, note: impl ToString) -> Error {
+        Error::Annotated(note.to_string(), Box::new(self.into()))
+    }
+}
+
+impl IntoResultExt for io::Error {
+    type T = Error;
+
+    fn annotate(self, note: impl ToString) -> Error {
+        Error::Annotated(note.to_string(), Box::new(self.at_unknown()))
+    }
+}
+
+impl<T, E: IntoResultExt> IntoResultExt for Result<T, E> {
+    type T = Result<T, E::T>;
+
+    fn annotate(self, note: impl ToString) -> Result<T, E::T> {
+        self.map_err(|e| e.annotate(note))
+    }
+}
+
+pub trait IoResultExt {
+    type T;
+
+    fn at(self, path: impl AsRef<std::path::Path>) -> Self::T;
+    fn at_unknown(self) -> Self::T;
+}
+
+impl IoResultExt for io::Error {
+    type T = Error;
+
+    fn at(self, path: impl AsRef<std::path::Path>) -> Error {
+        Error::Io(self, Some(path.as_ref().to_owned()))
+    }
+
+    fn at_unknown(self) -> Error {
+        Error::Io(self, None)
+    }
+}
+
+impl<T, E: IoResultExt> IoResultExt for Result<T, E> {
+    type T = Result<T, E::T>;
+
+    fn at(self, path: impl AsRef<std::path::Path>) -> Result<T, E::T> {
+        self.map_err(|e| e.at(path))
+    }
+
+    fn at_unknown(self) -> Result<T, E::T> {
+        self.map_err(|e| e.at_unknown())
+    }
+}
+
+
 /// Requests the page at the given path (which must include the initial `/`) from Lore Seeker
 ///
 /// # Features
@@ -80,7 +144,7 @@ pub fn resolve_query(query: &str) -> Result<(String, Vec<(String, Url)>), Error>
     let document = {
         let mut response = get(format!("/list?q={}", encoded_query))?;
         let mut response_content = String::default();
-        response.read_to_string(&mut response_content)?;
+        response.read_to_string(&mut response_content).annotate("resolve_query")?;
         kuchiki::parse_html().one(response_content)
     };
     let card_list_data = document.select_first("ul#search-result").map_err(|()| Error::MissingCardList)?;
