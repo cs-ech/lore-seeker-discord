@@ -12,6 +12,7 @@ use {
         fmt,
         fs::File,
         io::{
+            self,
             BufReader,
             prelude::*
         },
@@ -497,7 +498,15 @@ fn eat_word(subj: &mut &str) -> Option<String> {
 
 fn handle_ipc_client(ctx_arc: &Mutex<Option<Context>>, stream: TcpStream) -> Result<(), Error> {
     for line in BufReader::new(&stream).lines() {
-        let args = shlex::split(&line.annotate("IPC client line")?).ok_or(Error::Shlex)?;
+        let line = match line {
+            Ok(line) => line,
+            Err(e) => if e.kind() == io::ErrorKind::ConnectionReset {
+                break; // connection reset by peer, consider the IPC session terminated
+            } else {
+                return Err(e.annotate("IPC client line"));
+            }
+        };
+        let args = shlex::split(&line).ok_or(Error::Shlex)?;
         match &args[0][..] {
             "announce-exh-cards" => {
                 let ctx_guard = ctx_arc.lock();
