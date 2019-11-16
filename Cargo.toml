@@ -15,11 +15,20 @@ path = "src/lib.rs"
 [[bin]]
 name = "lore-seeker"
 path = "src/main.rs"
+doc = false
+test = false
+bench = false
+
+[[bin]]
+name = "find-cards"
+path = "src/find_cards.rs"
+doc = false
 test = false
 bench = false
 
 [dependencies]
 derive_more = "0"
+itertools = "0"
 kuchiki = "0"
 rand = "0"
 reqwest = "0"
