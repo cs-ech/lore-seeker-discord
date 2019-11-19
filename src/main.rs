@@ -788,7 +788,7 @@ fn mental_judge_tower(ctx: &Context, msg: &Message, mut players: Vec<UserId>, cu
         builder.push("\n");
     }
     builder.push(format!(
-        "seed: <https://{}/card?q={}+is%3Aprimary+not%3Areprint+sort%3Arand+%28%28-layout%3Asplit+-layout%3Aaftermath%29+or+number%3A%2Fa%2F%29",
+        "seed: <https://{}/card?q={}+is%3Amainfront+not%3Areprint+sort%3Arand",
         HOSTNAME,
         match custom {
             Some(true) => "st%3Acustom",
@@ -810,7 +810,7 @@ fn mental_judge_tower(ctx: &Context, msg: &Message, mut players: Vec<UserId>, cu
 
 fn momir(ctx: &Context, msg: &Message, cmc: usize, custom: Option<bool>, query: &str) -> Result<(), Error> {
     let query = format!(
-        "is:primary t:creature cmc={} {}{}{}",
+        "is:mainfront t:creature cmc={} {}{}{}",
         cmc,
         match custom {
             Some(true) => "is:custom",
