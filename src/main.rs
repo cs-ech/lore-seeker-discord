@@ -340,7 +340,13 @@ impl EventHandler for Handler {
                     Some("failed to connect to Lore Seeker website, try again later".into()) //TODO check if lore-seeker service is running
                 }
             }
-            Err(Error::UnknownCommand(cmd)) => Some(MessageBuilder::default().push("unknown command: %").push_safe(cmd).build()),
+            Err(Error::UnknownCommand(cmd)) => Some(
+                MessageBuilder::default()
+                    .push("Unknown command: %")
+                    .push_safe(cmd)
+                    .push(". See <https://github.com/fenhl/lore-seeker-discord/wiki> for my documentation, including a list of commands.")
+                    .build()
+            ),
             Err(e) => {
                 println!("Message handler returned error {:?}", e);
                 Some("unknown error (cc <@86841168427495424>)".into())
@@ -568,7 +574,7 @@ fn handle_message(ctx: &Context, msg: &Message) -> Result<(), Error> {
                     msg.reply(ctx, "pong")?;
                     return Ok(());
                 }
-                "help" => {
+                "help" | "commands" => {
                     msg.reply(ctx, "See <https://github.com/fenhl/lore-seeker-discord/wiki> for my documentation, including a list of commands.")?;
                 }
                 "check" => {
