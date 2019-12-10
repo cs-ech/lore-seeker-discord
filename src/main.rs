@@ -30,6 +30,7 @@ use {
         thread,
         time::Duration
     },
+    itertools::Itertools as _,
     kuchiki::traits::TendrilSink as _,
     mtg::{
         card::{
@@ -61,7 +62,7 @@ use {
 };
 
 macro_rules! manamoji {
-    ($($sym:expr => $id:expr;)+) => {
+    ($($sym:expr => :$name:ident:$id:expr;)+) => {
         #[allow(unused)] //TODO
         fn manamoji(&self, s: &str) -> Option<Emoji> {
             match s {
@@ -95,6 +96,14 @@ macro_rules! manamoji {
             )+
             s
         }
+
+        fn without_manamoji(&self, s: impl ToString) -> String {
+            s.to_string()
+                $(
+                    .split(concat!("<:", stringify!($name), ':', $id, '>'))
+                    .join($sym)
+                )+
+        }
     };
 }
 
@@ -118,73 +127,74 @@ macro_rules! indicator_emoji {
 trait EmojiCache {
     fn manamoji(&self, s: &str) -> Option<Emoji>;
     fn with_manamoji(&self, s: impl ToString) -> String;
+    fn without_manamoji(&self, s: impl ToString) -> String;
     fn indicator_emoji(&self, colors: &ColorSet) -> Option<Emoji>;
 }
 
 impl<T: AsRef<CacheRwLock>> EmojiCache for T {
     manamoji! {
-        "{0}" => 386740600436686878;
-        "{1}" => 386740600399069204;
-        "{10}" => 386740603708506142;
-        "{11}" => 386741116927475718;
-        "{12}" => 386741117577592833;
-        "{13}" => 386741118303469570;
-        "{14}" => 386741118668242964;
-        "{15}" => 386741118273847307;
-        "{16}" => 386741118597070850;
-        "{17}" => 386741120434044948;
-        "{18}" => 386741120006094860;
-        "{19}" => 386741120371261449;
-        "{2}" => 386740600755453953;
-        "{2/B}" => 386741115807596547;
-        "{2/G}" => 386741116118106122;
-        "{2/R}" => 386741116222963712;
-        "{2/U}" => 386741115933687809;
-        "{2/W}" => 386741116462039043;
-        "{20}" => 386741120543227906;
-        "{3}" => 386740601082871822;
-        "{4}" => 386740601556828160;
-        "{5}" => 386740601724338176;
-        "{6}" => 386740602265403392;
-        "{7}" => 386740602374717440;
-        "{8}" => 386740602747879435;
-        "{9}" => 386740603494334484;
-        "{A}" => 483811996924379156;
-        "{B}" => 386740604341583873;
-        "{B/G}" => 386740605847470081;
-        "{B/P}" => 386741121486815232;
-        "{B/R}" => 386740607017549838;
-        "{C}" => 386740607416139777;
-        "{CHAOS}" => 386741121608318986;
-        "{DISCOVER}" => 583092272028057601;
-        "{E}" => 386741121780416513;
-        "{G}" => 386740607827181569;
-        "{G/P}" => 386741122225012761;
-        "{G/U}" => 386740607906873344;
-        "{G/W}" => 386740607994953728;
-        "{P}" => 483816536176590898;
-        "{Q}" => 386741125987434506;
-        "{R}" => 386740612394778634;
-        "{R/G}" => 386740613430640640;
-        "{R/P}" => 386741125773262860;
-        "{R/W}" => 386740615498563588;
-        "{S}" => 386741126939541505;
-        "{T}" => 386740612143120385;
-        "{U}" => 386740612289789953;
-        "{U/B}" => 386740615683112992;
-        "{U/P}" => 386741126247350284;
-        "{U/R}" => 386740615649558534;
-        "{W}" => 386740617792978944;
-        "{W/B}" => 386740617780264960;
-        "{W/P}" => 386741126645809162;
-        "{W/U}" => 386740617792978964;
-        "{X}" => 386740617667018752;
-        "{Y}" => 386741126457065473;
-        "{Z}" => 386741127207845890;
-        "{hr}" => 386741125672730634;
-        "{hw}" => 386741125773262848;
-        "{½}" => 386741122510225421;
-        "{∞}" => 386741125861605387;
+        "{0}" => :mana0:386740600436686878;
+        "{1}" => :mana1:386740600399069204;
+        "{10}" => :mana10:386740603708506142;
+        "{11}" => :mana11:386741116927475718;
+        "{12}" => :mana12:386741117577592833;
+        "{13}" => :mana13:386741118303469570;
+        "{14}" => :mana14:386741118668242964;
+        "{15}" => :mana15:386741118273847307;
+        "{16}" => :mana16:386741118597070850;
+        "{17}" => :mana17:386741120434044948;
+        "{18}" => :mana18:386741120006094860;
+        "{19}" => :mana19:386741120371261449;
+        "{2}" => :mana2:386740600755453953;
+        "{2/B}" => :mana2b:386741115807596547;
+        "{2/G}" => :mana2g:386741116118106122;
+        "{2/R}" => :mana2r:386741116222963712;
+        "{2/U}" => :mana2u:386741115933687809;
+        "{2/W}" => :mana2w:386741116462039043;
+        "{20}" => :mana20:386741120543227906;
+        "{3}" => :mana3:386740601082871822;
+        "{4}" => :mana4:386740601556828160;
+        "{5}" => :mana5:386740601724338176;
+        "{6}" => :mana6:386740602265403392;
+        "{7}" => :mana7:386740602374717440;
+        "{8}" => :mana8:386740602747879435;
+        "{9}" => :mana9:386740603494334484;
+        "{B}" => :manab:386740604341583873;
+        "{B/G}" => :manabg:386740605847470081;
+        "{B/P}" => :manabp:386741121486815232;
+        "{B/R}" => :manabr:386740607017549838;
+        "{C}" => :manac:386740607416139777;
+        "{CHAOS}" => :manachaos:386741121608318986;
+        "{DISCOVER}" => :manadiscover:583092272028057601;
+        "{E}" => :manae:386741121780416513;
+        "{G}" => :manag:386740607827181569;
+        "{G/P}" => :managp:386741122225012761;
+        "{G/U}" => :managu:386740607906873344;
+        "{G/W}" => :managw:386740607994953728;
+        "{P}" => :manap:483816536176590898;
+        "{Q}" => :manaq:386741125987434506;
+        "{R}" => :manar:386740612394778634;
+        "{R/G}" => :manarg:386740613430640640;
+        "{R/P}" => :manarp:386741125773262860;
+        "{R/W}" => :manarw:386740615498563588;
+        "{S}" => :manas:386741126939541505;
+        "{T}" => :manat:386740612143120385;
+        "{U}" => :manau:386740612289789953;
+        "{U/B}" => :manaub:386740615683112992;
+        "{U/P}" => :manaup:386741126247350284;
+        "{U/R}" => :manaur:386740615649558534;
+        "{V}" => :manarunic:483811996924379156;
+        "{W}" => :manaw:386740617792978944;
+        "{W/B}" => :manawb:386740617780264960;
+        "{W/P}" => :manawp:386741126645809162;
+        "{W/U}" => :manawu:386740617792978964;
+        "{X}" => :manax:386740617667018752;
+        "{Y}" => :manay:386741126457065473;
+        "{Z}" => :manaz:386741127207845890;
+        "{hr}" => :manahr:386741125672730634;
+        "{hw}" => :manahw:386741125773262848;
+        "{½}" => :manahalf:386741122510225421;
+        "{∞}" => :manainfinity:386741125861605387;
     }
 
     indicator_emoji! {
@@ -619,7 +629,7 @@ fn handle_message(ctx: &Context, msg: &Message) -> Result<(), Error> {
                     return Ok(());
                 }
                 "rand" | "random" => {
-                    return handle_query(ctx, msg, query, true);
+                    return handle_query(ctx, msg, &ctx.without_manamoji(query), true);
                 }
                 "reload" | "update" => {
                     owner_check(ctx, &msg)?;
@@ -673,7 +683,7 @@ fn handle_message(ctx: &Context, msg: &Message) -> Result<(), Error> {
                         players.push(user_id);
                         eat_whitespace(query);
                     }
-                    return mental_judge_tower(ctx, &msg, players, Some(false), query);
+                    return mental_judge_tower(ctx, &msg, players, Some(false), &ctx.without_manamoji(query));
                 }
                 "cmjt" => {
                     // custom Mental Judge Tower, for custom cards
@@ -682,7 +692,7 @@ fn handle_message(ctx: &Context, msg: &Message) -> Result<(), Error> {
                         players.push(user_id);
                         eat_whitespace(query);
                     }
-                    return mental_judge_tower(ctx, &msg, players, Some(true), query);
+                    return mental_judge_tower(ctx, &msg, players, Some(true), &ctx.without_manamoji(query));
                 }
                 "fmjt" => {
                     // fusion Mental Judge Tower, for both real and custom cards
@@ -691,25 +701,25 @@ fn handle_message(ctx: &Context, msg: &Message) -> Result<(), Error> {
                         players.push(user_id);
                         eat_whitespace(query);
                     }
-                    return mental_judge_tower(ctx, &msg, players, None, query);
+                    return mental_judge_tower(ctx, &msg, players, None, &ctx.without_manamoji(query));
                 }
                 "momir" => {
                     // Momir, for real cards
                     let cmc = eat_word(query).ok_or(Error::MomirMissingCmc)?.parse::<usize>()?;
                     eat_whitespace(query);
-                    return momir(ctx, msg, cmc, Some(false), query);
+                    return momir(ctx, msg, cmc, Some(false), &ctx.without_manamoji(query));
                 }
                 "cmomir" => {
                     // custom Momir, for custom cards
                     let cmc = eat_word(query).ok_or(Error::MomirMissingCmc)?.parse::<usize>()?;
                     eat_whitespace(query);
-                    return momir(ctx, msg, cmc, Some(true), query);
+                    return momir(ctx, msg, cmc, Some(true), &ctx.without_manamoji(query));
                 }
                 "fmomir" => {
                     // fusion Momir, for both real and custom cards
                     let cmc = eat_word(query).ok_or(Error::MomirMissingCmc)?.parse::<usize>()?;
                     eat_whitespace(query);
-                    return momir(ctx, msg, cmc, None, query);
+                    return momir(ctx, msg, cmc, None, &ctx.without_manamoji(query));
                 }
                 cmd => {
                     return Err(Error::UnknownCommand(cmd.into()));
@@ -717,7 +727,7 @@ fn handle_message(ctx: &Context, msg: &Message) -> Result<(), Error> {
             }
         }
     } else if query.len() > 0 {
-        handle_query(ctx, msg, query, false)?;
+        handle_query(ctx, msg, &ctx.without_manamoji(query), false)?;
     } else if is_inline_channel {
         let mut remaining_msg = &msg.content[..];
         while let Some(start_idx) = remaining_msg.find("[[") {
@@ -735,7 +745,7 @@ fn handle_message(ctx: &Context, msg: &Message) -> Result<(), Error> {
                         format!("!{}", urlencoding::encode(query)) //TODO fix query
                     )?;
                 } else {
-                    handle_query(ctx, msg, query, false)?;
+                    handle_query(ctx, msg, &ctx.without_manamoji(query), false)?;
                 }
                 remaining_msg = &remaining_msg[end_idx + 2..];
             } else {
