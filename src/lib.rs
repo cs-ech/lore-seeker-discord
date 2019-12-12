@@ -23,10 +23,12 @@ pub const HOSTNAME: &str = "lore-seeker.cards";
 
 #[derive(Debug, From)]
 pub enum Error {
+    #[from(ignore)]
     Annotated(String, Box<Error>),
     Db(mtg::card::DbError),
     DmOnlyCommand,
     Env(env::VarError),
+    #[from(ignore)]
     Io(io::Error, Option<PathBuf>),
     Json(serde_json::Error),
     MissingANode,
@@ -40,6 +42,7 @@ pub enum Error {
     MissingOwners,
     MissingTextNode,
     MomirMissingCmc,
+    #[from(ignore)]
     NoSuchCard(String),
     OwnerCheck,
     ParseInt(std::num::ParseIntError),
@@ -47,6 +50,7 @@ pub enum Error {
     Reqwest(reqwest::Error),
     Serenity(serenity::Error),
     Shlex,
+    #[from(ignore)]
     UnknownCommand(String),
     UrlParse(url::ParseError)
 }
