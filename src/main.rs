@@ -566,20 +566,19 @@ fn handle_message(ctx: &Context, msg: &Message) -> Result<(), Error> {
         msg.guild_id.map_or(false, |guild_id| inline_guilds.contains(&guild_id))
         != ctx_data.get::<InlineChannels>().ok_or(Error::MissingInlineChannels)?.contains(&msg.channel_id)
     };
-    let query = &mut if msg.content.starts_with(&current_user_id.mention()) { //TODO allow <@!id> mentions
-        let mut query = &msg.content[current_user_id.mention().len()..];
+    let mut query = &msg.content[..];
+    if eat_user_mention(&mut query) == Some(current_user_id) {
         if query.starts_with(':') { query = &query[1..]; }
         if query.starts_with(' ') { query = &query[1..]; }
-        query
     } else if is_inline_channel && msg.content.starts_with('%') || msg.is_private() {
-        &msg.content[..]
+        // use full message as query
     } else {
-        ""
+        query = ""
     };
     if query.starts_with('%') {
         // command
-        *query = &query[1..];
-        if let Some(cmd_name) = eat_word(query) {
+        query = &query[1..];
+        if let Some(cmd_name) = eat_word(&mut query) {
             match &cmd_name[..] {
                 "quit" => {
                     owner_check(ctx, &msg)?;
@@ -644,7 +643,7 @@ fn handle_message(ctx: &Context, msg: &Message) -> Result<(), Error> {
                     return Ok(());
                 }
                 "booster" | "boosters" | "pack" | "packs" | "sealed" => {
-                    while let Some(set_code) = eat_word(query) {
+                    while let Some(set_code) = eat_word(&mut query) {
                         let lower_code = set_code.to_ascii_lowercase();
                         let document = {
                             let mut response = get(format!("/sealed?count[]=1&set[]={}", lower_code))?;
@@ -685,46 +684,46 @@ fn handle_message(ctx: &Context, msg: &Message) -> Result<(), Error> {
                 "mjt" => {
                     // Mental Judge Tower, for real cards
                     let mut players = Vec::default();
-                    while let Some(user_id) = eat_user_mention(query) {
+                    while let Some(user_id) = eat_user_mention(&mut query) {
                         players.push(user_id);
-                        eat_whitespace(query);
+                        eat_whitespace(&mut query);
                     }
                     return mental_judge_tower(ctx, &msg, players, Some(false), &ctx.without_manamoji(query));
                 }
                 "cmjt" => {
                     // custom Mental Judge Tower, for custom cards
                     let mut players = Vec::default();
-                    while let Some(user_id) = eat_user_mention(query) {
+                    while let Some(user_id) = eat_user_mention(&mut query) {
                         players.push(user_id);
-                        eat_whitespace(query);
+                        eat_whitespace(&mut query);
                     }
                     return mental_judge_tower(ctx, &msg, players, Some(true), &ctx.without_manamoji(query));
                 }
                 "fmjt" => {
                     // fusion Mental Judge Tower, for both real and custom cards
                     let mut players = Vec::default();
-                    while let Some(user_id) = eat_user_mention(query) {
+                    while let Some(user_id) = eat_user_mention(&mut query) {
                         players.push(user_id);
-                        eat_whitespace(query);
+                        eat_whitespace(&mut query);
                     }
                     return mental_judge_tower(ctx, &msg, players, None, &ctx.without_manamoji(query));
                 }
                 "momir" => {
                     // Momir, for real cards
-                    let cmc = eat_word(query).ok_or(Error::MomirMissingCmc)?.parse::<usize>()?;
-                    eat_whitespace(query);
+                    let cmc = eat_word(&mut query).ok_or(Error::MomirMissingCmc)?.parse::<usize>()?;
+                    eat_whitespace(&mut query);
                     return momir(ctx, msg, cmc, Some(false), &ctx.without_manamoji(query));
                 }
                 "cmomir" => {
                     // custom Momir, for custom cards
-                    let cmc = eat_word(query).ok_or(Error::MomirMissingCmc)?.parse::<usize>()?;
-                    eat_whitespace(query);
+                    let cmc = eat_word(&mut query).ok_or(Error::MomirMissingCmc)?.parse::<usize>()?;
+                    eat_whitespace(&mut query);
                     return momir(ctx, msg, cmc, Some(true), &ctx.without_manamoji(query));
                 }
                 "fmomir" => {
                     // fusion Momir, for both real and custom cards
-                    let cmc = eat_word(query).ok_or(Error::MomirMissingCmc)?.parse::<usize>()?;
-                    eat_whitespace(query);
+                    let cmc = eat_word(&mut query).ok_or(Error::MomirMissingCmc)?.parse::<usize>()?;
+                    eat_whitespace(&mut query);
                     return momir(ctx, msg, cmc, None, &ctx.without_manamoji(query));
                 }
                 cmd => {
