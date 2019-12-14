@@ -945,6 +945,7 @@ pub fn shut_down(ctx: &Context) {
 }
 
 fn main() -> Result<(), Error> {
+    env_logger::init();
     let mut args = env::args().peekable();
     let _ = args.next(); // ignore executable name
     if let Some(subcmd) = args.peek() {

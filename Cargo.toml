@@ -28,6 +28,7 @@ bench = false
 
 [dependencies]
 derive_more = "0"
+env_logger = "0"
 itertools = "0"
 kuchiki = "0"
 rand = "0"
