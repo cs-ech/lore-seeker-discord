@@ -32,6 +32,7 @@ use {
     },
     itertools::Itertools as _,
     kuchiki::traits::TendrilSink as _,
+    log::info,
     mtg::{
         card::{
             Card,
@@ -556,6 +557,7 @@ fn handle_ipc_client(ctx_arc: &Mutex<Option<Context>>, stream: TcpStream) -> Res
 }
 
 fn handle_message(ctx: &Context, msg: &Message) -> Result<(), Error> {
+    info!("handling message {:?}", msg.content);
     let current_user_id = AsRef::<CacheRwLock>::as_ref(ctx).read().user.id;
     let is_inline_channel = {
         // guild in inlineGuilds xor channel in inlineChannels
