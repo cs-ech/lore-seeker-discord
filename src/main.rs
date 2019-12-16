@@ -493,7 +493,7 @@ fn card_embed<'a>(ctx: &impl AsRef<CacheRwLock>, e: &'a mut CreateEmbed, card: C
 }
 
 fn card_name_url(card: impl ToString) -> Result<Url, url::ParseError> {
-    format!("https://{}/card?q=!{}", HOSTNAME, urlencoding::encode(&card.to_string())).parse()
+    format!("https://{}/card?q=!{}", hostname(), urlencoding::encode(&card.to_string())).parse()
 }
 
 #[must_use]
@@ -623,7 +623,7 @@ fn handle_message(ctx: &Context, msg: &Message) -> Result<(), Error> {
                     }
                     msg.reply(ctx, "done, resolving query…")?;
                     let (encoded_query, matches) = resolve_query(query)?;
-                    msg.reply(ctx, &format!("{} cards found: <https://{}/card?q={}>. Checking cards…", matches.len(), HOSTNAME, encoded_query))?;
+                    msg.reply(ctx, &format!("{} cards found: <https://{}/card?q={}>. Checking cards…", matches.len(), hostname(), encoded_query))?;
                     let data = ctx.data.read();
                     let db = data.get::<CardDb>().ok_or(Error::MissingCardDb)?;
                     let mut oks = 0;
@@ -670,7 +670,7 @@ fn handle_message(ctx: &Context, msg: &Message) -> Result<(), Error> {
                             response.read_to_string(&mut response_content).annotate("sealed response")?;
                             kuchiki::parse_html().one(response_content)
                         };
-                        let base_url = Url::parse(&format!("https://{}/", HOSTNAME))?;
+                        let base_url = Url::parse(&format!("https://{}/", hostname()))?;
                         let set_name = document.select_first(&format!(".pack_selection option[value=\"{}\"]", lower_code)).ok()
                             .map_or(set_code, |node_data| node_data.text_contents());
                         let cards = document.select(".card_picture_cell").map_err(|()| Error::MissingCardList)?.map(|cell| {
@@ -796,7 +796,7 @@ fn handle_query_result(ctx: &Context, msg: &Message, matches: impl IntoIterator<
         }
     } else {
         match (matches.next(), matches.next()) {
-            (Some(_), Some(_)) => { msg.reply(ctx, &format!("{} cards found: <https://{}/card?q={}>", 2 + matches.count(), HOSTNAME, encoded_query))?; }
+            (Some(_), Some(_)) => { msg.reply(ctx, &format!("{} cards found: <https://{}/card?q={}>", 2 + matches.count(), hostname(), encoded_query))?; }
             (Some((card_name, card_url)), None) => {
                 show_single_card(ctx, msg.channel_id, Some((&msg, None)), &card_name, &card_url)?;
             }
@@ -829,7 +829,7 @@ fn mental_judge_tower(ctx: &Context, msg: &Message, mut players: Vec<UserId>, cu
     }
     builder.push(format!(
         "seed: <https://{}/card?q={}+is%3Amainfront+not%3Areprint+sort%3Arand",
-        HOSTNAME,
+        hostname(),
         match custom {
             Some(true) => "st%3Acustom",
             Some(false) => "%28f%3AVintage+or+%28banned%3AVintage+-o%3A%2F%5CWante%5CW%2F%29%29",

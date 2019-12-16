@@ -19,8 +19,6 @@ use {
     url::Url
 };
 
-pub const HOSTNAME: &str = "lore-seeker.cards";
-
 #[derive(Debug, From)]
 pub enum Error {
     #[from(ignore)]
@@ -128,10 +126,10 @@ impl<T, E: IoResultExt> IoResultExt for Result<T, E> {
 /// # Features
 ///
 /// If the `local` feature is enabled (it is by default), this function will use the hostname `localhost:18803`.
-/// Otherwise, the value of the constant `HOSTNAME` is used.
+/// Otherwise, the return value of `hostname` is used.
 pub fn get(path: String) -> Result<reqwest::Response, Error> {
-    #[cfg(feature = "local")] let hostname = "localhost:18803";
-    #[cfg(not(feature = "local"))] let hostname = HOSTNAME;
+    #[cfg(feature = "local")] let hostname = if is_dev() { "localhost:18808" } else { "localhost:18803" };
+    #[cfg(not(feature = "local"))] let hostname = hostname();
     Ok(
         reqwest::ClientBuilder::new()
             .timeout(Some(Duration::from_secs(60))) // increased timeout due to performance issues in %sealed
@@ -140,6 +138,18 @@ pub fn get(path: String) -> Result<reqwest::Response, Error> {
             .send()?
             .error_for_status()?
     )
+}
+
+pub fn hostname() -> &'static str {
+    if is_dev() {
+        "dev.lore-seeker.cards"
+    } else {
+        "lore-seeker.cards"
+    }
+}
+
+fn is_dev() -> bool {
+    env::var_os("LORESEEKERDATA") == Some("/usr/local/share/fenhl/lore-seeker/dev".into())
 }
 
 /// Sends the given query to Lore Seeker using `get` and returns the URL-encoded query as well as the list of (card name, card page) pairs.
@@ -154,7 +164,7 @@ pub fn resolve_query(query: &str) -> Result<(String, Vec<(String, Url)>), Error>
     let card_list_data = document.select_first("ul#search-result").map_err(|()| Error::MissingCardList)?;
     let card_list = card_list_data.as_node();
     let mut matches = Vec::default();
-    let base_url = Url::parse(&format!("https://{}/", HOSTNAME))?;
+    let base_url = Url::parse(&format!("https://{}/", hostname()))?;
     for li_node_data in card_list.select("li").map_err(|()| Error::MissingCardList)? {
         let li_node = li_node_data.as_node();
         let a_node_data = li_node.select_first("a").map_err(|()| Error::MissingCardLink)?;
