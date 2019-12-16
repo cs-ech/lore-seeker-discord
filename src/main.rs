@@ -21,6 +21,7 @@ use {
             TcpListener,
             TcpStream
         },
+        path::PathBuf,
         process::{
             Command,
             Stdio
@@ -238,7 +239,6 @@ impl<T: AsRef<CacheRwLock>> EmojiCache for T {
     }
 }
 
-const CONFIG_PATH: &str = "/usr/local/share/fenhl/lore-seeker/config.json";
 const EXH_CARDS_CHANNEL: ChannelId = ChannelId(639419990843326464);
 const IPC_ADDR: &str = "127.0.0.1:18806";
 
@@ -290,6 +290,13 @@ struct Config {
     #[serde(default)]
     inline_guilds: HashSet<GuildId>,
     bot_token: String
+}
+
+impl Config {
+    fn new() -> Result<Config, Error> {
+        let path = config_path();
+        Ok(serde_json::from_reader(File::open(&path).at(path)?)?)
+    }
 }
 
 #[derive(Default)]
@@ -370,6 +377,13 @@ impl EventHandler for Handler {
             msg.reply(ctx, &err_reply).expect("failed to send error reply");
         }
     }
+}
+
+#[must_use]
+fn base_path() -> PathBuf {
+    env::var_os("LORESEEKERDATA")
+        .unwrap_or_else(|| "/usr/local/share/fenhl/lore-seeker".into())
+        .into()
 }
 
 #[must_use]
@@ -480,6 +494,11 @@ fn card_embed<'a>(ctx: &impl AsRef<CacheRwLock>, e: &'a mut CreateEmbed, card: C
 
 fn card_name_url(card: impl ToString) -> Result<Url, url::ParseError> {
     format!("https://{}/card?q=!{}", HOSTNAME, urlencoding::encode(&card.to_string())).parse()
+}
+
+#[must_use]
+fn config_path() -> PathBuf {
+    base_path().join("config.json")
 }
 
 fn eat_user_mention(subj: &mut &str) -> Option<UserId> {
@@ -883,7 +902,7 @@ fn owner_check(ctx: &Context, msg: &Message) -> Result<(), Error> {
 }
 
 fn reload_all(ctx: &Context) -> Result<(), Error> {
-    let config = serde_json::from_reader::<_, Config>(File::open(CONFIG_PATH).at(CONFIG_PATH)?)?;
+    let config = Config::new()?;
     let mut data = ctx.data.write();
     reload_config(&mut data, config)?;
     reload_db(&mut data)?;
@@ -897,7 +916,7 @@ fn reload_config(ctx_data: &mut ShareMap, config: Config) -> Result<(), Error> {
 }
 
 fn reload_db(ctx_data: &mut ShareMap) -> Result<(), Error> {
-    let db = Db::from_sets_dir("/opt/git/github.com/fenhl/lore-seeker/stage/data/sets", true)?;
+    let db = Db::from_sets_dir(sets_path(), true)?;
     ctx_data.insert::<CardDb>(db);
     Ok(())
 }
@@ -915,6 +934,10 @@ fn send_ipc_command_wait<T: fmt::Display, I: IntoIterator<Item = T>>(cmd: I) -> 
     BufReader::new(stream).read_line(&mut buf).annotate("send_ipc_command_wait read")?;
     if buf.pop() != Some('\n') { return Err(Error::MissingNewline) }
     Ok(buf)
+}
+
+fn sets_path() -> PathBuf {
+    base_path().join("repo").join("data").join("sets")
 }
 
 fn show_single_card(ctx: &Context, channel_id: ChannelId, reply: Option<(&Message, Option<&str>)>, card_name: &str, card_url: &Url) -> Result<(), Error> {
@@ -958,7 +981,7 @@ fn main() -> Result<(), Error> {
         }
     } else {
         // read config
-        let config = serde_json::from_reader::<_, Config>(File::open(CONFIG_PATH).at(CONFIG_PATH)?)?;
+        let config = Config::new()?;
         let handler = Handler::default();
         let ctx_arc = handler.0.clone();
         let mut client = Client::new(&config.bot_token, handler)?;
@@ -970,7 +993,7 @@ fn main() -> Result<(), Error> {
             reload_config(&mut data, config)?;
             // load cards before going online
             println!("loading cards");
-            let db = Db::from_sets_dir("/opt/git/github.com/fenhl/lore-seeker/stage/data/sets", true)?;
+            let db = Db::from_sets_dir(sets_path(), true)?;
             assert!(db.card("Dryad Arbor").ok_or(Error::NoSuchCard("Dryad Arbor".to_owned()))?.loyalty().is_none());
             let num_cards = db.into_iter().count();
             data.insert::<CardDb>(db);

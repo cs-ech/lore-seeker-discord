@@ -1,5 +1,5 @@
 [Unit]
-Description=Lore Seeker Discord bot
+Description=Lore Seeker Discord bot (development instance)
 Documentation=https://github.com/fenhl/lore-seeker-discord
 After=network.target
 
@@ -11,7 +11,8 @@ ExecStop=/home/fenhl/.cargo/bin/cargo run --release --bin=lore-seeker -- quit
 User=fenhl
 Group=fenhl
 WorkingDirectory=/opt/git/github.com/fenhl/lore-seeker-discord/master
-Environment=RUST_LOG=warn
+Environment=RUST_LOG=info
+Environment=LORESEEKERDATA=/usr/local/share/fenhl/lore-seeker/dev
 
 [Install]
 WantedBy=multi-user.target
