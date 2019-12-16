@@ -308,7 +308,7 @@ impl EventHandler for Handler {
         let guilds = ready.user.guilds(&ctx).expect("failed to get guilds");
         if guilds.is_empty() {
             println!("No guilds found, use following URL to invite the bot:");
-            println!("{}", ready.user.invite_url(&ctx, Permissions::READ_MESSAGES | Permissions::SEND_MESSAGES | Permissions::USE_EXTERNAL_EMOJIS).expect("failed to generate invite URL"));
+            println!("{}", ready.user.invite_url(&ctx, Permissions::READ_MESSAGES | Permissions::SEND_MESSAGES | Permissions::EMBED_LINKS | Permissions::ATTACH_FILES | Permissions::USE_EXTERNAL_EMOJIS | Permissions::ADD_REACTIONS).expect("failed to generate invite URL"));
             shut_down(&ctx);
         }
     }
