@@ -240,7 +240,6 @@ impl<T: AsRef<CacheRwLock>> EmojiCache for T {
 }
 
 const EXH_CARDS_CHANNEL: ChannelId = ChannelId(639419990843326464);
-const IPC_ADDR: &str = "127.0.0.1:18806";
 
 trait MessageBuilderExt {
     fn push_card_link(&mut self, card: &Card) -> &mut Self;
@@ -806,8 +805,16 @@ fn handle_query_result(ctx: &Context, msg: &Message, matches: impl IntoIterator<
     Ok(())
 }
 
+fn ipc_addr() -> &'static str {
+    if is_dev() {
+        "127.0.0.1:18810"
+    } else {
+        "127.0.0.1:18806"
+    }
+}
+
 fn listen_ipc(ctx_arc: Arc<Mutex<Option<Context>>>) -> Result<(), Error> { //TODO change return type to Result<!, Error>
-    for stream in TcpListener::bind(IPC_ADDR).annotate("IPC listener")?.incoming() {
+    for stream in TcpListener::bind(ipc_addr()).annotate("IPC listener")?.incoming() {
         if let Err(e) = stream.map_err(|e| e.annotate("incoming stream")).and_then(|stream| handle_ipc_client(&ctx_arc, stream)) {
             notify_ipc_crash(e);
         }
@@ -922,13 +929,13 @@ fn reload_db(ctx_data: &mut ShareMap) -> Result<(), Error> {
 }
 
 fn send_ipc_command_no_wait<T: fmt::Display, I: IntoIterator<Item = T>>(cmd: I) -> Result<(), Error> {
-    let mut stream = TcpStream::connect(IPC_ADDR).annotate("send_ipc_command_no_wait connect")?;
+    let mut stream = TcpStream::connect(ipc_addr()).annotate("send_ipc_command_no_wait connect")?;
     writeln!(&mut stream, "{}", cmd.into_iter().map(|arg| shlex::quote(&arg.to_string()).into_owned()).collect::<Vec<_>>().join(" ")).annotate("send_ipc_command_no_wait write")?;
     Ok(())
 }
 
 fn send_ipc_command_wait<T: fmt::Display, I: IntoIterator<Item = T>>(cmd: I) -> Result<String, Error> {
-    let mut stream = TcpStream::connect(IPC_ADDR).annotate("send_ipc_command_wait connect")?;
+    let mut stream = TcpStream::connect(ipc_addr()).annotate("send_ipc_command_wait connect")?;
     writeln!(&mut stream, "{}", cmd.into_iter().map(|arg| shlex::quote(&arg.to_string()).into_owned()).collect::<Vec<_>>().join(" ")).annotate("send_ipc_command_wait write")?;
     let mut buf = String::default();
     BufReader::new(stream).read_line(&mut buf).annotate("send_ipc_command_wait read")?;

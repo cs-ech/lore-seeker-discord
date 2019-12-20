@@ -148,7 +148,7 @@ pub fn hostname() -> &'static str {
     }
 }
 
-fn is_dev() -> bool {
+pub fn is_dev() -> bool {
     env::var_os("LORESEEKERDATA") == Some("/usr/local/share/fenhl/lore-seeker/dev".into())
 }
 
