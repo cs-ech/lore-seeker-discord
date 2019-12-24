@@ -889,10 +889,11 @@ fn notify_ipc_crash(e: Error) {
         let stdin = child.stdin.as_mut().expect("failed to open ssmtp stdin");
         write!(
             stdin,
-            "To: fenhl@fenhl.net\nFrom: {}@{}\nSubject: Lore Seeker IPC thread crashed\n\nLore Seeker IPC thread crashed with the following error:\n{:?}\n",
-            whoami::username(),
-            whoami::hostname(),
-            e
+            "To: fenhl@fenhl.net\nFrom: {username}@{hostname}\nSubject: {bot} IPC thread crashed\n\n{bot} IPC thread crashed with the following error:\n{error:?}\n",
+            bot=if is_dev() { "Lore Seeker (dev)" } else { "Lore Seeker" },
+            error=e,
+            hostname=whoami::hostname(),
+            username=whoami::username()
         ).expect("failed to write to ssmtp stdin");
     }
     child.wait().expect("failed to wait for ssmtp subprocess"); //TODO check exit status
