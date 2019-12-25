@@ -16,6 +16,7 @@ use {
     },
     derive_more::From,
     kuchiki::traits::TendrilSink as _,
+    serenity::model::prelude::*,
     url::Url
 };
 
@@ -23,6 +24,7 @@ use {
 pub enum Error {
     #[from(ignore)]
     Annotated(String, Box<Error>),
+    ChannelIdParse(ChannelIdParseError),
     Db(mtg::card::DbError),
     DmOnlyCommand,
     Env(env::VarError),

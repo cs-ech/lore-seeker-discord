@@ -555,6 +555,13 @@ fn handle_ipc_client(ctx_arc: &Mutex<Option<Context>>, stream: TcpStream) -> Res
                 }
                 writeln!(&mut &stream, "card(s) announced").annotate("announce-exh-cards IPC reply")?;
             }
+            "channel-msg" => {
+                let ctx_guard = ctx_arc.lock();
+                let ctx = ctx_guard.as_ref().ok_or(Error::MissingContext)?;
+                let channel = args[1].parse::<ChannelId>().annotate("failed to parse channel snowflake")?;
+                channel.say(ctx, &args[2]).annotate("failed to send channel message")?;
+                writeln!(&mut &stream, "message sent").annotate("channel-msg IPC reply")?;
+            }
             "quit" => {
                 let ctx_guard = ctx_arc.lock();
                 let ctx = ctx_guard.as_ref().ok_or(Error::MissingContext)?;
