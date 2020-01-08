@@ -962,9 +962,9 @@ fn show_single_card(ctx: &Context, channel_id: ChannelId, reply: Option<(&Messag
     };
     channel_id.send_message(ctx, |m| {
         let m = match (reply, card.is_some()) {
-            (None, true) | (Some((_, None)), _) => m, // card can be rendered and no explicit reply text exists, so just send the render
-            (None, false) => m.content(format!("1 card found: <{}>", card_url)),
-            (Some((msg, Some(reply_text))), _) => m.content(MessageBuilder::default().mention(&msg.author).push(format!(": {}: <{}>", reply_text, card_url)))
+            (Some((msg, Some(reply_text))), _) => m.content(MessageBuilder::default().mention(&msg.author).push(format!(": {}: <{}>", reply_text, card_url))), // explicit reply text
+            (_, true) => m, // card can be rendered and no explicit reply text exists, so just send the render
+            _ => m.content(format!("1 card found: <{}>", card_url)), // card can't be rendered, so just send the link
         };
         if let Some(card) = card {
             m.embed(|e| card_embed(ctx, e, card, card_url))
