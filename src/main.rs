@@ -235,7 +235,7 @@ impl<T: AsRef<CacheRwLock>> EmojiCache for T {
     }
 }
 
-const EXH_CARDS_CHANNEL: ChannelId = ChannelId(639419990843326464);
+const XMAGE_DEV_CHANNEL: ChannelId = ChannelId(668133870675165244);
 const FENHL: UserId = UserId(86841168427495424);
 
 trait MessageBuilderExt {
@@ -548,7 +548,7 @@ fn handle_ipc_client(ctx_arc: &Mutex<Option<Context>>, stream: TcpStream) -> Res
                 let ctx_guard = ctx_arc.lock();
                 let ctx = ctx_guard.as_ref().ok_or(Error::MissingContext)?;
                 for card_name in &args[1..] {
-                    show_single_card(&ctx, EXH_CARDS_CHANNEL, None, card_name, &card_name_url(card_name)?)?;
+                    show_single_card(&ctx, XMAGE_DEV_CHANNEL, None, card_name, &card_name_url(card_name)?)?;
                 }
                 writeln!(&mut &stream, "card(s) announced").annotate("announce-exh-cards IPC reply")?;
             }
@@ -571,6 +571,24 @@ fn handle_ipc_client(ctx_arc: &Mutex<Option<Context>>, stream: TcpStream) -> Res
                 let ctx = ctx_guard.as_ref().ok_or(Error::MissingContext)?;
                 reload_all(ctx)?;
                 writeln!(&mut &stream, "reload complete").annotate("reload IPC reply")?;
+            }
+            "xmage-summary" => {
+                let ctx_guard = ctx_arc.lock();
+                let ctx = ctx_guard.as_ref().ok_or(Error::MissingContext)?;
+                let cards = &args[1..];
+                let mut msg = MessageBuilder::default();
+                msg.push_bold("Daily summary");
+                if cards.len() > 10 {
+                    msg.push_line("")
+                        .push(format!("• {} new cards implemented: <https://dev.lore-seeker.cards/xmage/news>", cards.len()));
+                } else {
+                    for card_name in cards {
+                        msg.push_line("")
+                            .push(format!("• [{}]({}) implemented", card_name, card_name_url(card_name)?));
+                    }
+                }
+                XMAGE_DEV_CHANNEL.say(&ctx, msg)?;
+                writeln!(&mut &stream, "summary posted").annotate("xmage-summary IPC reply")?;
             }
             s => { return Err(Error::UnknownCommand(s.to_owned())); }
         }
