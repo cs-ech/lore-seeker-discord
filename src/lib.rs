@@ -122,7 +122,6 @@ impl<T, E: IoResultExt> IoResultExt for Result<T, E> {
     }
 }
 
-
 /// Requests the page at the given path (which must include the initial `/`) from Lore Seeker
 ///
 /// # Features

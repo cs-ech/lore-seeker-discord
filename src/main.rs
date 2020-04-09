@@ -236,6 +236,7 @@ impl<T: AsRef<CacheRwLock>> EmojiCache for T {
 }
 
 const EXH_CARDS_CHANNEL: ChannelId = ChannelId(639419990843326464);
+const FENHL: UserId = UserId(86841168427495424);
 
 trait MessageBuilderExt {
     fn push_card_link(&mut self, card: &Card) -> &mut Self;
@@ -819,7 +820,7 @@ fn ipc_addr() -> &'static str {
 fn listen_ipc(ctx_arc: Arc<Mutex<Option<Context>>>) -> Result<(), Error> { //TODO change return type to Result<!, Error>
     for stream in TcpListener::bind(ipc_addr()).annotate("IPC listener")?.incoming() {
         if let Err(e) = stream.map_err(|e| e.annotate("incoming stream")).and_then(|stream| handle_ipc_client(&ctx_arc, stream)) {
-            notify_ipc_crash(e);
+            notify_thread_crash(&ctx_arc.lock(), "IPC client", e);
         }
     }
     unreachable!();
@@ -882,24 +883,21 @@ fn next_word(subj: &str) -> Option<String> {
     if word.is_empty() { None } else { Some(word) }
 }
 
-fn notify_ipc_crash(e: Error) {
-    let mut child = Command::new("ssmtp")
-        .arg("fenhl@fenhl.net")
-        .stdin(Stdio::piped())
-        .spawn()
-        .expect("failed to spawn ssmtp");
-    {
-        let stdin = child.stdin.as_mut().expect("failed to open ssmtp stdin");
-        write!(
-            stdin,
-            "To: fenhl@fenhl.net\nFrom: {username}@{hostname}\nSubject: {bot} IPC thread crashed\n\n{bot} IPC thread crashed with the following error:\n{error:?}\n",
-            bot=if is_dev() { "Lore Seeker (dev)" } else { "Lore Seeker" },
-            error=e,
-            hostname=whoami::hostname(),
-            username=whoami::username()
-        ).expect("failed to write to ssmtp stdin");
+fn notify_thread_crash(ctx: &Option<Context>, thread_kind: &str, e: Error) {
+    if ctx.as_ref().and_then(|ctx| FENHL.to_user(ctx).and_then(|fenhl| fenhl.dm(ctx, |m| m.content(format!("{} thread crashed: {:?}", thread_kind, e)))).ok()).is_none() {
+        let mut child = Command::new("mail")
+            .arg("-s")
+            .arg(format!("{} {} thread crashed", if is_dev() { "Lore Seeker (dev)" } else { "Lore Seeker" }, thread_kind))
+            .arg("fenhl@fenhl.net")
+            .stdin(Stdio::piped())
+            .spawn()
+            .expect("failed to spawn mail");
+        {
+            let stdin = child.stdin.as_mut().expect("failed to open mail stdin");
+            write!(stdin, "{} {} thread crashed with the following error:\n{:?}\n", if is_dev() { "Lore Seeker (dev)" } else { "Lore Seeker" }, thread_kind, e).expect("failed to write to mail stdin");
+        }
+        child.wait().expect("failed to wait for mail subprocess"); //TODO check exit status
     }
-    child.wait().expect("failed to wait for ssmtp subprocess"); //TODO check exit status
 }
 
 fn owner_check(ctx: &Context, msg: &Message) -> Result<(), Error> {
@@ -1013,9 +1011,9 @@ fn main() -> Result<(), Error> {
         // listen for IPC commands
         {
             thread::Builder::new().name("Lore Seeker IPC".into()).spawn(move || {
-                if let Err(e) = listen_ipc(ctx_arc) { //TODO remove `if` after changing from `()` to `!`
+                if let Err(e) = listen_ipc(ctx_arc.clone()) { //TODO remove `if` after changing from `()` to `!`
                     eprintln!("{:?}", e);
-                    notify_ipc_crash(e);
+                    notify_thread_crash(&ctx_arc.lock(), "IPC", e);
                 }
             }).annotate("spawn IPC connection thread")?;
         }
