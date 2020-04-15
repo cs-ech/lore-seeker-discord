@@ -3,6 +3,7 @@
 use {
     std::{
         env,
+        fmt,
         io::{
             self,
             prelude::*
@@ -119,6 +120,45 @@ impl<T, E: IoResultExt> IoResultExt for Result<T, E> {
 
     fn at_unknown(self) -> Result<T, E::T> {
         self.map_err(|e| e.at_unknown())
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::Annotated(note, e) => write!(f, "{}: {}", note, e),
+            Error::ChannelIdParse(e) => e.fmt(f),
+            Error::Db(e) => write!(f, "card database error: {:?}", e), //TODO implement Display for DbError
+            Error::DmOnlyCommand => write!(f, "to avoid spamming channels, this command is only allowed in direct messages"),
+            Error::Env(e) => e.fmt(f),
+            Error::Io(e, Some(path)) => write!(f, "I/O error at {}: {}", path.display(), e),
+            Error::Io(e, None) => write!(f, "I/O error: {}", e),
+            Error::Json(e) => write!(f, "JSON error: {}", e),
+            Error::MissingANode => write!(f, "failed to parse Lore Seeker search results: missing a node"),
+            Error::MissingCardDb => write!(f, "attempted to access card database before loading it"),
+            Error::MissingCardLink => write!(f, "failed to parse Lore Seeker search results: missing card link"),
+            Error::MissingCardList => write!(f, "failed to parse Lore Seeker search results: missing card list"),
+            Error::MissingContext => write!(f, "Serenity context not available before ready event"),
+            Error::MissingHref => write!(f, "failed to parse Lore Seeker search results: missing href"),
+            Error::MissingInlineChannels => write!(f, "failed to load inline channels config"),
+            Error::MissingNewline => write!(f, "IPC thread closed without trailing newline"),
+            Error::MissingOwners => write!(f, "failed to load list of bot owners"),
+            Error::MissingTextNode => write!(f, "failed to parse Lore Seeker search results: missing text node"),
+            Error::MomirMissingCmc => write!(f, "missing CMC for Momir Basic"),
+            Error::NoSuchCard(card_name) => write!(f, "no such card: {}", card_name),
+            Error::OwnerCheck => write!(f, "this command can only be used by the bot owner"),
+            Error::ParseInt(e) => write!(f, "invalid number: {}", e),
+            Error::Poison => write!(f, "poison error"),
+            Error::Reqwest(e) => if let Some(url) = e.url() {
+                write!(f, "reqwest error at {}: {}", url, e)
+            } else {
+                write!(f, "reqwest error: {}", e)
+            },
+            Error::Serenity(e) => e.fmt(f),
+            Error::Shlex => write!(f, "failed to parse command line"),
+            Error::UnknownCommand(cmd) => write!(f, "unknown command: {}", cmd),
+            Error::UrlParse(e) => e.fmt(f),
+        }
     }
 }
 
