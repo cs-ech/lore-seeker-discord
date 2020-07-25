@@ -168,9 +168,12 @@ impl fmt::Display for Error {
 ///
 /// If the `local` feature is enabled (it is by default), this function will use the hostname `localhost:18803`.
 /// Otherwise, the return value of `hostname` is used.
-pub fn get(path: String) -> Result<reqwest::Response, Error> {
-    #[cfg(feature = "local")] let hostname = if is_dev() { "localhost:18808" } else { "localhost:18803" };
-    #[cfg(not(feature = "local"))] let hostname = hostname();
+pub fn get(host: Option<&str>, path: String) -> Result<reqwest::Response, Error> {
+    let hostname = host.unwrap_or_else(|| {
+        #[cfg(feature = "local")] let hostname = if is_dev() { "localhost:18808" } else { "localhost:18803" };
+        #[cfg(not(feature = "local"))] let hostname = hostname();
+        hostname
+    });
     Ok(
         reqwest::ClientBuilder::new()
             .timeout(Some(Duration::from_secs(60))) // increased timeout due to performance issues in %sealed
@@ -197,7 +200,7 @@ pub fn is_dev() -> bool {
 pub fn resolve_query(host: Option<&str>, query: &str) -> Result<(String, Vec<(String, Url)>), Error> {
     let encoded_query = urlencoding::encode(if query.is_empty() { "*" } else { query });
     let document = {
-        let mut response = get(format!("/list?q={}", encoded_query))?;
+        let mut response = get(host, format!("/list?q={}", encoded_query))?;
         let mut response_content = String::default();
         response.read_to_string(&mut response_content).annotate("resolve_query")?;
         kuchiki::parse_html().one(response_content)

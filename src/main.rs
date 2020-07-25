@@ -686,7 +686,7 @@ fn handle_message(ctx: &Context, msg: &Message) -> Result<(), Error> {
                     while let Some(set_code) = eat_word(&mut query) {
                         let lower_code = set_code.to_ascii_lowercase();
                         let document = {
-                            let mut response = get(format!("/sealed?count[]=1&set[]={}", lower_code))?;
+                            let mut response = get(None, format!("/sealed?count[]=1&set[]={}", lower_code))?;
                             let mut response_content = String::default();
                             response.read_to_string(&mut response_content).annotate("sealed response")?;
                             kuchiki::parse_html().one(response_content)
