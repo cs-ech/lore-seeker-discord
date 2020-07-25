@@ -9,7 +9,7 @@ use {
 };
 
 fn main() -> Result<(), Error> {
-    let (_, results) = resolve_query(&env::args().skip(1).join(" "))?;
+    let (_, results) = resolve_query(None, &env::args().skip(1).join(" "))?;
     for (card_name, _) in results {
         println!("{}", card_name);
     }

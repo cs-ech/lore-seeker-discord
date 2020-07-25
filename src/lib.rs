@@ -194,7 +194,7 @@ pub fn is_dev() -> bool {
 }
 
 /// Sends the given query to Lore Seeker using `get` and returns the URL-encoded query as well as the list of (card name, card page) pairs.
-pub fn resolve_query(query: &str) -> Result<(String, Vec<(String, Url)>), Error> {
+pub fn resolve_query(host: Option<&str>, query: &str) -> Result<(String, Vec<(String, Url)>), Error> {
     let encoded_query = urlencoding::encode(if query.is_empty() { "*" } else { query });
     let document = {
         let mut response = get(format!("/list?q={}", encoded_query))?;
@@ -205,7 +205,7 @@ pub fn resolve_query(query: &str) -> Result<(String, Vec<(String, Url)>), Error>
     let card_list_data = document.select_first("ul#search-result").map_err(|()| Error::MissingCardList)?;
     let card_list = card_list_data.as_node();
     let mut matches = Vec::default();
-    let base_url = Url::parse(&format!("https://{}/", hostname()))?;
+    let base_url = Url::parse(&format!("https://{}/", host.unwrap_or_else(|| hostname())))?;
     for li_node_data in card_list.select("li").map_err(|()| Error::MissingCardList)? {
         let li_node = li_node_data.as_node();
         let a_node_data = li_node.select_first("a").map_err(|()| Error::MissingCardLink)?;

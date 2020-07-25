@@ -643,7 +643,7 @@ fn handle_message(ctx: &Context, msg: &Message) -> Result<(), Error> {
                         reload_db(&mut data)?;
                     }
                     msg.reply(ctx, "done, resolving query…")?;
-                    let (encoded_query, matches) = resolve_query(query)?;
+                    let (encoded_query, matches) = resolve_query(None, query)?;
                     msg.reply(ctx, &format!("{} cards found: <https://{}/card?q={}>. Checking cards…", matches.len(), hostname(), encoded_query))?;
                     let data = ctx.data.read();
                     let db = data.get::<CardDb>().ok_or(Error::MissingCardDb)?;
@@ -802,7 +802,7 @@ fn handle_message(ctx: &Context, msg: &Message) -> Result<(), Error> {
 }
 
 fn handle_query(ctx: &Context, msg: &Message, query: &str, random: bool) -> Result<(), Error> {
-    let (encoded_query, matches) = resolve_query(query)?;
+    let (encoded_query, matches) = resolve_query(None, query)?;
     handle_query_result(ctx, msg, matches, random, encoded_query)
 }
 
