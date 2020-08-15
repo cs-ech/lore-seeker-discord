@@ -40,6 +40,7 @@ pub(crate) fn add(guild_id: GuildId, member: Member) -> Result<(), Error> {
     let mut f = File::create(&path).at(&path)?;
     write!(f, "{:#}", json!({
         "discriminator": user.discriminator,
+        "roles": member.roles,
         "snowflake": user.id,
         "username": user.name
     })).at(path)?;

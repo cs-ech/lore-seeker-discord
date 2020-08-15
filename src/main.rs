@@ -310,33 +310,47 @@ impl EventHandler for Handler {
     }
 
     fn guild_ban_addition(&self, _: Context, guild_id: GuildId, user: User) {
-        user_list::remove(guild_id, user).expect("failed to remove banned user from user list");
+        if !is_dev() {
+            user_list::remove(guild_id, user).expect("failed to remove banned user from user list");
+        }
     }
 
     fn guild_ban_removal(&self, ctx: Context, guild_id: GuildId, user: User) {
-        user_list::add(guild_id, guild_id.member(ctx, user).expect("failed to get unbanned guild member")).expect("failed to add unbanned user to user list");
+        if !is_dev() {
+            user_list::add(guild_id, guild_id.member(ctx, user).expect("failed to get unbanned guild member")).expect("failed to add unbanned user to user list");
+        }
     }
 
     fn guild_create(&self, _: Context, guild: Guild, _: bool) {
-        user_list::set_guild(guild.id, guild.members.values().cloned()).expect("failed to initialize user list");
+        if !is_dev() {
+            user_list::set_guild(guild.id, guild.members.values().cloned()).expect("failed to initialize user list");
+        }
         println!("Connected to {}", guild.name);
     }
 
     fn guild_member_addition(&self, _: Context, guild_id: GuildId, member: Member) {
-        user_list::add(guild_id, member).expect("failed to add new guild member to user list");
+        if !is_dev() {
+            user_list::add(guild_id, member).expect("failed to add new guild member to user list");
+        }
     }
 
     fn guild_member_removal(&self, _: Context, guild_id: GuildId, user: User, _: Option<Member>) {
-        user_list::remove(guild_id, user).expect("failed to remove removed guild member from user list");
+        if !is_dev() {
+            user_list::remove(guild_id, user).expect("failed to remove removed guild member from user list");
+        }
     }
 
     fn guild_member_update(&self, _: Context, _: Option<Member>, member: Member) {
-        user_list::update(member.guild_id, member).expect("failed to update guild member info in user list");
+        if !is_dev() {
+            user_list::update(member.guild_id, member).expect("failed to update guild member info in user list");
+        }
     }
 
     fn guild_members_chunk(&self, _: Context, guild_id: GuildId, members: HashMap<UserId, Member>) {
-        for member in members.values() {
-            user_list::add(guild_id, member.clone()).expect("failed to add chunk of guild members to user list");
+        if !is_dev() {
+            for member in members.values() {
+                user_list::add(guild_id, member.clone()).expect("failed to add chunk of guild members to user list");
+            }
         }
     }
 
