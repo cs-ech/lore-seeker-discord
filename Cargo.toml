@@ -27,22 +27,27 @@ test = false
 bench = false
 
 [dependencies]
-derive_more = "0"
 env_logger = "0"
 itertools = "0"
 kuchiki = "0"
 log = "0"
 rand = "0"
-reqwest = "0.9" #TODO update to 0.10 once serenity supports async
+reqwest = "0.9" #TODO update to 0.10 after updating serenity to 0.9
 serde = "1"
 serde_json = "1"
-serenity = "0"
+serenity = "0.8" #TODO update to 0.9
 shlex = "0"
-typemap = "0"
+typemap = "0" #TODO remove after updating serenity to 0.9
 url = "2"
 urlencoding = "1"
 whoami = "0"
 
+[dependencies.derive_more]
+version = "0.99"
+default-features = false
+features = ["from"]
+
 [dependencies.mtg]
 git = "https://github.com/fenhl/rust-mtg"
+branch = "main"
 features = ["custom"]
